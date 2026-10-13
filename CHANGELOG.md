@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Reject partial bootstrap authority before reseeding; validate private secret creation paths and required original-profile metadata on every start.
+- Separate mail transport deadlines from durable outcome recording; retain healthy retry/readiness and stable jobs through timeout and restart.
+- Bind test-only faults to all frozen command-bearing Auth routes and reject unsupported selectors before arming.
+
 - Add the private Auth HTTP process, explicit real Argon2id bootstrap, retained owner secrets and single-writer shutdown.
 - Compose real lifecycle HTTP transport and minimum Ed25519 service/anonymous credentials; separate Serving discovery from lifecycle and fixture credentials.
 - Add test-owned authenticated Unix controls, injected clocks, durable job discovery, bounded fault decorators and production/fixture container builds.

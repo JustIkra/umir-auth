@@ -13,6 +13,39 @@ import (
 	"github.com/JustIkra/umir-auth/internal/adapters/strictjson"
 )
 
+func admitPrivateDirectory(p string, create bool) error {
+	if filepath.Clean(p) != p {
+		return ErrNotReady
+	}
+	absolute, e := filepath.Abs(p)
+	if e != nil {
+		return ErrNotReady
+	}
+	for dir := absolute; dir != "/"; dir = filepath.Dir(dir) {
+		info, statErr := os.Lstat(dir)
+		if create && errors.Is(statErr, os.ErrNotExist) {
+			continue
+		}
+		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return ErrNotReady
+		}
+	}
+	if create {
+		if e = os.MkdirAll(absolute, 0700); e != nil {
+			return ErrNotReady
+		}
+	}
+	info, e := os.Lstat(absolute)
+	if e != nil || !info.IsDir() || info.Mode().Perm() != 0700 {
+		return ErrNotReady
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || st.Uid != uint32(os.Geteuid()) || st.Gid != uint32(os.Getegid()) {
+		return ErrNotReady
+	}
+	return nil
+}
+
 func ReadPrivateFile(p string, limit int64) ([]byte, error) {
 	for dir := filepath.Dir(p); dir != "/" && dir != "."; dir = filepath.Dir(dir) {
 		info, e := os.Lstat(dir)

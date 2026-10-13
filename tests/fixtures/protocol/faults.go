@@ -43,7 +43,7 @@ func (f *Faults) Control(operation string, data []byte) (any, string) {
 		f.armed.State = "expired"
 	}
 	if operation == "owner.fault.arm" {
-		if in.Point == "warehouse-after-prepare-before-analytics" {
+		if !supportedFault(in.Point, in.OperationID) {
 			return nil, "UnsupportedOperation"
 		}
 		if f.armed != nil && f.armed.State == "armed" {
@@ -193,28 +193,73 @@ func (f *Faults) WrapHTTP(next http.Handler) http.Handler {
 		}
 	})
 }
+
+type faultRoute struct{ Method, Path, Operation string }
+
+var faultRoutes = []faultRoute{
+	{"POST", "/internal/auth/v1/public/session", "login"},
+	{"POST", "/internal/auth/v1/public/sessions/logout-all", "logoutAll"},
+	{"PATCH", "/internal/auth/v1/public/me/display-name", "displayName"},
+	{"PATCH", "/internal/auth/v1/public/me/password", "password"},
+	{"POST", "/internal/auth/v1/public/orgs", "createOrganization"},
+	{"DELETE", "/internal/auth/v1/public/orgs/{orgID}", "deleteOrganization"},
+	{"PATCH", "/internal/auth/v1/public/orgs/{orgID}/settings", "updateSettings"},
+	{"POST", "/internal/auth/v1/public/orgs/{orgID}/restaurants", "createRestaurant"},
+	{"DELETE", "/internal/auth/v1/public/orgs/{orgID}/restaurants/{restaurantID}", "deleteRestaurant"},
+	{"PUT", "/internal/auth/v1/public/orgs/{orgID}/memberships/{membershipID}", "updateMembership"},
+	{"DELETE", "/internal/auth/v1/public/orgs/{orgID}/memberships/{membershipID}", "revokeMembership"},
+	{"DELETE", "/internal/auth/v1/public/orgs/{orgID}/memberships/{membershipID}/assignments/{assignmentID}", "revokeAssignment"},
+	{"POST", "/internal/auth/v1/public/orgs/{orgID}/invitations", "createInvitation"},
+	{"POST", "/internal/auth/v1/public/orgs/{orgID}/invitations/{invitationID}/resend", "resendInvitation"},
+	{"DELETE", "/internal/auth/v1/public/orgs/{orgID}/invitations/{invitationID}", "cancelInvitation"},
+	{"POST", "/internal/auth/v1/public/invitations/{invitationID}/challenges", "beginInvitationChallenge"},
+	{"POST", "/internal/auth/v1/public/challenges/{challengeID}/resend", "resendChallenge"},
+	{"POST", "/internal/auth/v1/public/challenges/{challengeID}/verify", "verifyChallenge"},
+	{"POST", "/internal/auth/v1/public/challenges/{challengeID}/complete", "completeInvitedUser"},
+	{"POST", "/internal/auth/v1/public/invitations/{invitationID}/accept", "acceptInvitation"},
+	{"POST", "/internal/auth/v1/public/email-challenges", "beginEmailChallenge"},
+	{"POST", "/internal/auth/v1/public/email-challenges/{challengeID}/complete", "completeEmailChallenge"},
+}
+
+func supportedFault(point, operation string) bool {
+	switch point {
+	case "before-commit", "after-real-commit-return-unknown", "after-durable-before-reply":
+	default:
+		return false
+	}
+	for _, route := range faultRoutes {
+		if route.Operation == operation {
+			return true
+		}
+	}
+	return false
+}
+
 func facadeOperation(method, path string) string {
-	switch {
-	case path == "/internal/auth/v1/public/session" && method == "POST":
-		return "login"
-	case path == "/internal/auth/v1/public/orgs" && method == "POST":
-		return "createOrganization"
-	case strings.HasSuffix(path, "/restaurants") && method == "POST":
-		return "createRestaurant"
-	case strings.HasSuffix(path, "/invitations") && method == "POST":
-		return "createInvitation"
-	case strings.Contains(path, "/invitations/") && strings.HasSuffix(path, "/challenges"):
-		return "beginInvitationChallenge"
-	case strings.Contains(path, "/challenges/") && strings.HasSuffix(path, "/resend"):
-		return "resendChallenge"
-	case strings.Contains(path, "/challenges/") && strings.HasSuffix(path, "/verify"):
-		return "verifyChallenge"
-	case strings.Contains(path, "/email-challenges/") && strings.HasSuffix(path, "/complete"):
-		return "completeEmailChallenge"
-	case strings.Contains(path, "/challenges/") && strings.HasSuffix(path, "/complete"):
-		return "completeInvitedUser"
-	case path == "/internal/auth/v1/public/email-challenges":
-		return "beginEmailChallenge"
+	segments := strings.Split(path, "/")
+	for _, route := range faultRoutes {
+		if method != route.Method {
+			continue
+		}
+		expected := strings.Split(route.Path, "/")
+		if len(segments) != len(expected) {
+			continue
+		}
+		matches := true
+		for i, part := range expected {
+			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
+				if segments[i] == "" {
+					matches = false
+					break
+				}
+			} else if part != segments[i] {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return route.Operation
+		}
 	}
 	return ""
 }

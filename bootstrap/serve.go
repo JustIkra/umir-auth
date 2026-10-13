@@ -14,6 +14,14 @@ import (
 
 type hostWaiter struct{}
 
+type boundedMailSender struct{ sender application.MailSender }
+
+func (s boundedMailSender) Send(ctx context.Context, delivery application.MailDelivery) application.DeliveryResult {
+	deliveryContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return s.sender.Send(deliveryContext, delivery)
+}
+
 func (hostWaiter) Wait(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
@@ -47,8 +55,8 @@ func (r *Runtime) Serve(ctx context.Context, listener net.Listener, handler http
 			case <-work.Done():
 				return
 			case <-timer.C:
-				attempt, stop := context.WithTimeout(work, 5*time.Second)
-				_, mailErr := r.Accounts.ProcessMail(attempt, sender)
+				attempt, stop := context.WithTimeout(work, 10*time.Second)
+				_, mailErr := r.Accounts.ProcessMail(attempt, boundedMailSender{sender})
 				if mailErr != nil && work.Err() == nil {
 					r.failWorker(mailErr)
 					stop()

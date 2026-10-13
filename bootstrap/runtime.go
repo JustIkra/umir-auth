@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"github.com/JustIkra/umir-auth/internal/adapters/challengesecrets"
 	"github.com/JustIkra/umir-auth/internal/adapters/httpapi"
@@ -96,8 +97,14 @@ func Open(ctx context.Context, o Options) (r *Runtime, err error) {
 	if statErr != nil && !initialize {
 		return nil, ErrNotReady
 	}
+	if err = admitPrivateDirectory(o.SecretsDir, initialize); err != nil {
+		return nil, err
+	}
 	var store *jsonstore.Store
 	if initialize {
+		if _, e := os.Lstat(filepath.Join(o.SecretsDir, "owner.json")); !errors.Is(e, os.ErrNotExist) {
+			return nil, ErrNotReady
+		}
 		if o.Initial == nil || o.Initial.Email != "" || o.Initial.CredentialVersion != "1" {
 			return nil, ErrBootstrapConflict
 		}
@@ -138,16 +145,14 @@ func Open(ctx context.Context, o Options) (r *Runtime, err error) {
 	if err != nil {
 		return nil, ErrNotReady
 	}
-	if secrets.Initial != nil {
-		found := false
-		for _, u := range v.Snapshot().Users {
-			if u.UserID == secrets.Initial.UserID && u.Login == secrets.Initial.Login {
-				found = true
-			}
+	found := false
+	for _, u := range v.Snapshot().Users {
+		if u.UserID == secrets.Initial.UserID && u.Login == secrets.Initial.Login {
+			found = true
 		}
-		if !found {
-			return nil, ErrBootstrapConflict
-		}
+	}
+	if !found {
+		return nil, ErrBootstrapConflict
 	}
 	results, err := sessionsecrets.New(secrets.Results, rand.Reader)
 	if err != nil {
@@ -179,9 +184,6 @@ func loadSecrets(o Options, initialize bool) (ownerSecrets, error) {
 		if _, e := os.Lstat(p); !errors.Is(e, os.ErrNotExist) {
 			return s, ErrNotReady
 		}
-		if e := os.MkdirAll(o.SecretsDir, 0700); e != nil {
-			return s, ErrNotReady
-		}
 		kid, e := NewID()
 		s.SigningKID = kid
 		if e != nil {
@@ -206,7 +208,7 @@ func loadSecrets(o Options, initialize bool) (ownerSecrets, error) {
 			return s, ErrNotReady
 		}
 		defer clear(b)
-		f, e := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		f, e := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
 		if e != nil {
 			return s, ErrNotReady
 		}
@@ -234,6 +236,9 @@ func loadSecrets(o Options, initialize bool) (ownerSecrets, error) {
 	}
 	if s.Version != 1 || len(s.SigningSeed) != 32 || len(s.Results) != 32 || len(s.ChallengeKey) != 32 || len(s.ChallengePepper) != 32 {
 		return s, ErrNotReady
+	}
+	if s.Initial == nil || o.Initial == nil || *s.Initial != *o.Initial {
+		return s, ErrBootstrapConflict
 	}
 	b, e := json.Marshal(o.Initial)
 	if e != nil {
