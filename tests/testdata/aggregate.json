@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "aggregateRevision": "1",
+  "users": [
+    {
+      "userID": "00000001-1111-4111-8111-111111111111",
+      "login": "owner",
+      "displayName": "Owner",
+      "email": "owner@example.invalid",
+      "credentialVersion": "1",
+      "verifier": "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU"
+    }
+  ],
+  "organizations": [
+    {
+      "orgID": "00000002-1111-4111-8111-111111111111",
+      "name": "Organization",
+      "settings": {
+        "timeZone": "Europe/Moscow",
+        "settingsVersion": "1"
+      },
+      "lifecycle": "active",
+      "lifecycleVersion": "1"
+    }
+  ],
+  "restaurants": [
+    {
+      "restaurantID": "00000003-1111-4111-8111-111111111111",
+      "orgID": "00000002-1111-4111-8111-111111111111",
+      "name": "Restaurant",
+      "lifecycle": "registering",
+      "lifecycleVersion": "1"
+    }
+  ],
+  "memberships": [
+    {
+      "membershipID": "00000004-1111-4111-8111-111111111111",
+      "membershipVersion": "1",
+      "userID": "00000001-1111-4111-8111-111111111111",
+      "orgID": "00000002-1111-4111-8111-111111111111",
+      "orgRoles": [
+        "Admin"
+      ],
+      "assignments": [
+        {
+          "restaurantID": "00000003-1111-4111-8111-111111111111",
+          "assignmentID": "00000005-1111-4111-8111-111111111111",
+          "assignmentVersion": "1",
+          "roles": [
+            "Warehouse"
+          ]
+        }
+      ],
+      "state": "active"
+    }
+  ],
+  "sessions": [
+    {
+      "sessionID": "00000006-1111-4111-8111-111111111111",
+      "userID": "00000001-1111-4111-8111-111111111111",
+      "sessionVersion": "1",
+      "credentialVersion": "1",
+      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "csrfTokenDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "createdAt": "2026-10-13T01:00:00+03:00",
+      "idleExpiresAt": "2026-10-13T01:30:00+03:00",
+      "absoluteExpiresAt": "2026-10-13T09:00:00+03:00",
+      "rememberMe": false,
+      "revoked": false
+    }
+  ],
+  "invitations": [
+    {
+      "invitationID": "00000007-1111-4111-8111-111111111111",
+      "orgID": "00000002-1111-4111-8111-111111111111",
+      "email": "invite@example.invalid",
+      "comparisonEmail": "invite@example.invalid",
+      "assignments": [
+        {
+          "restaurantID": "00000003-1111-4111-8111-111111111111",
+          "roles": [
+            "Waiter"
+          ]
+        }
+      ],
+      "expiresAt": "2026-10-13T09:00:00+03:00",
+      "resendAvailableAt": "2026-10-13T01:01:00+03:00",
+      "state": "pending",
+      "version": "1"
+    }
+  ],
+  "challenges": [
+    {
+      "challengeID": "00000008-1111-4111-8111-111111111111",
+      "purpose": "invitation",
+      "invitationID": "00000007-1111-4111-8111-111111111111",
+      "initiatorDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "codeDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "encryptedCode": "synthetic-encrypted-code",
+      "expiresAt": "2026-10-13T01:10:00+03:00",
+      "resendAvailableAt": "2026-10-13T01:01:00+03:00",
+      "state": "pending",
+      "issueCount": 1,
+      "wrongAttempts": 0
+    }
+  ],
+  "mailJobs": [
+    {
+      "jobID": "00000009-1111-4111-8111-111111111111",
+      "challengeID": "00000008-1111-4111-8111-111111111111",
+      "orgID": "00000002-1111-4111-8111-111111111111",
+      "invitationID": "00000007-1111-4111-8111-111111111111",
+      "state": "queued",
+      "encryptedPayload": "synthetic-encrypted-mail",
+      "acceptedAt": "2026-10-13T01:00:00+03:00",
+      "attempts": 0
+    }
+  ],
+  "idempotency": [
+    {
+      "actorID": "00000001-1111-4111-8111-111111111111",
+      "operationID": "createRestaurant",
+      "orgID": "00000002-1111-4111-8111-111111111111",
+      "restaurantID": "00000003-1111-4111-8111-111111111111",
+      "commandID": "create-once",
+      "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "aggregateRevision": "1",
+      "httpStatus": 201,
+      "responseSchema": "LifecycleResult",
+      "encryptedResponse": "synthetic-encrypted-result",
+      "jobIDs": []
+    }
+  ],
+  "lifecycleIntents": [
+    {
+      "operationID": "0000000a-1111-4111-8111-111111111111",
+      "commandID": "create-once",
+      "actorID": "00000001-1111-4111-8111-111111111111",
+      "orgID": "00000002-1111-4111-8111-111111111111",
+      "restaurantIDs": [
+        "00000003-1111-4111-8111-111111111111"
+      ],
+      "lifecycle": "registering",
+      "lifecycleVersion": "1",
+      "cleanup": "not_required",
+      "services": [
+        {
+          "restaurantID": "00000003-1111-4111-8111-111111111111",
+          "service": "warehouse",
+          "state": "pending",
+          "lifecycleVersion": "1"
+        },
+        {
+          "restaurantID": "00000003-1111-4111-8111-111111111111",
+          "service": "serving",
+          "state": "pending",
+          "lifecycleVersion": "1"
+        },
+        {
+          "restaurantID": "00000003-1111-4111-8111-111111111111",
+          "service": "gateway",
+          "state": "pending",
+          "lifecycleVersion": "1"
+        }
+      ]
+    }
+  ],
+  "tombstones": []
+}

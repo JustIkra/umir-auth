@@ -1,0 +1,4 @@
+.cache/
+auth.json
+auth.json.lock
+.auth.tmp-*

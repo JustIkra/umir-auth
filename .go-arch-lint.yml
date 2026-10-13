@@ -1,0 +1,40 @@
+version: 3
+workdir: .
+allow:
+  deepScan: false
+  depOnAnyVendor: false
+  ignoreNotFoundComponents: true
+components:
+  domain: {in: "internal/domain/**"}
+  contract: {in: "contract/**"}
+  application: {in: "internal/application/**"}
+  adapters: {in: "internal/adapters/**"}
+  bootstrap: {in: "bootstrap/**"}
+  process: {in: "cmd/**"}
+  testsupport: {in: "tests/testsupport/**"}
+  tests: {in: "tests/**"}
+vendors:
+  x-text-norm: {in: "golang.org/x/text/unicode/norm"}
+  x-crypto-argon2: {in: "golang.org/x/crypto/argon2"}
+  fixture-schema: {in: "github.com/santhosh-tekuri/jsonschema/v6"}
+  ecma-regexp: {in: "github.com/dlclark/regexp2"}
+deps:
+  domain:
+    mayDependOn: [domain]
+  contract:
+    mayDependOn: [contract]
+  application:
+    mayDependOn: [application, domain, contract]
+    canUse: [x-text-norm]
+  adapters:
+    mayDependOn: [adapters, application, domain, contract]
+    canUse: [x-crypto-argon2, fixture-schema, ecma-regexp]
+  bootstrap:
+    mayDependOn: [bootstrap, application, adapters, domain, contract]
+  process:
+    mayDependOn: [process, bootstrap]
+  testsupport:
+    mayDependOn: [testsupport, domain, contract]
+  tests:
+    mayDependOn: [tests, testsupport, application, adapters, domain, contract, bootstrap]
+    canUse: [fixture-schema, ecma-regexp]
