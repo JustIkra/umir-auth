@@ -41,7 +41,7 @@ func New(o Options) (http.Handler, error) {
 	keys := map[string]string{}
 	seen := map[string]bool{}
 	for name, k := range o.ServiceKeys {
-		if name != "gateway" && name != "serving" && name != "warehouse" {
+		if name != "gateway" && name != "serving" && name != "warehouse" && name != "feedback" {
 			return nil, application.ErrAuthUnavailable
 		}
 		if !keyPattern.MatchString(k) || seen[k] {
@@ -61,6 +61,16 @@ func New(o Options) (http.Handler, error) {
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
+	for name, key := range h.o.ServiceKeys {
+		if name == "feedback" {
+			for _, supplied := range r.Header.Values("X-Umir-Service-Key") {
+				if subtle.ConstantTimeCompare([]byte(supplied), []byte(key)) == 1 && (r.Method != "GET" || r.URL.Path != "/internal/auth/v1/jwks" || r.URL.RawPath != "" || r.URL.RawQuery != "" || r.URL.ForceQuery) {
+					failure(w, application.ErrForbidden)
+					return
+				}
+			}
+		}
+	}
 	if r.URL.Path == "/healthz" {
 		write(w, 200, struct {
 			Status string `json:"status"`

@@ -75,7 +75,7 @@ func LoadConfig(path string) (Config, string, error) {
 	if json.Unmarshal(cfg.Delivery, &delivery) != nil || delivery.SMTPCA != (FileRef{Target: "auth", Path: "/run/umir-fixtures/secrets/synthetic-ca.pem"}) || delivery.NotificationCA != (FileRef{Target: "auth", Path: "/run/umir-fixtures/secrets/synthetic-ca.pem"}) {
 		return cfg, "", errors.New("invalid delivery references")
 	}
-	keys := []string{"gateway-auth", "auth-warehouse", "auth-serving", "auth-gateway", "serving-auth"}
+	keys := []string{"gateway-auth", "auth-warehouse", "auth-serving", "auth-gateway", "serving-auth", "feedback-auth"}
 	if len(cfg.CredentialFiles) != len(keys) {
 		return cfg, "", errors.New("unexpected credential binding")
 	}

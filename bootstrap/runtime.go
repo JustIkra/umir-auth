@@ -80,8 +80,9 @@ func (entropy) NewToken() (string, error) {
 	}
 	return hex.EncodeToString(b[:]), nil
 }
-func NewID() (string, error) { id, e := (entropy{}).NewID(); return string(id), e }
-func Open(ctx context.Context, o Options) (r *Runtime, err error) {
+func NewID() (string, error)                                { id, e := (entropy{}).NewID(); return string(id), e }
+func Open(ctx context.Context, o Options) (*Runtime, error) { return open(ctx, o, nil) }
+func open(ctx context.Context, o Options, imported *domain.ValidatedAggregate) (r *Runtime, err error) {
 	if o.Clock == nil || o.TimeZones == nil || o.StateFile == "" || o.SecretsDir == "" {
 		return nil, ErrNotReady
 	}
@@ -101,6 +102,9 @@ func Open(ctx context.Context, o Options) (r *Runtime, err error) {
 		return nil, err
 	}
 	var store *jsonstore.Store
+	if imported != nil && !initialize {
+		return nil, ErrBootstrapConflict
+	}
 	if initialize {
 		if _, e := os.Lstat(filepath.Join(o.SecretsDir, "owner.json")); !errors.Is(e, os.ErrNotExist) {
 			return nil, ErrNotReady
@@ -112,18 +116,26 @@ func Open(ctx context.Context, o Options) (r *Runtime, err error) {
 		if e != nil || name != o.Initial.DisplayName {
 			return nil, ErrBootstrapConflict
 		}
-		if application.CheckPassword(o.Password) != nil {
-			return nil, ErrBootstrapConflict
-		}
-		verifier, e := hasher.Hash(o.Password)
-		if e != nil {
-			return nil, ErrNotReady
-		}
-		a := domain.Empty()
-		a.Users = append(a.Users, domain.User{UserID: o.Initial.UserID, Login: o.Initial.Login, DisplayName: name, CredentialVersion: o.Initial.CredentialVersion, Verifier: verifier})
-		v, e := domain.Validate(a)
-		if e != nil {
-			return nil, ErrBootstrapConflict
+		var v domain.ValidatedAggregate
+		if imported != nil {
+			v, err = validateImported(o, *imported, hasher)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			if application.CheckPassword(o.Password) != nil {
+				return nil, ErrBootstrapConflict
+			}
+			verifier, e := hasher.Hash(o.Password)
+			if e != nil {
+				return nil, ErrNotReady
+			}
+			a := domain.Empty()
+			a.Users = append(a.Users, domain.User{UserID: o.Initial.UserID, Login: o.Initial.Login, DisplayName: name, CredentialVersion: o.Initial.CredentialVersion, Verifier: verifier})
+			v, e = domain.Validate(a)
+			if e != nil {
+				return nil, ErrBootstrapConflict
+			}
 		}
 		store, err = jsonstore.Initialize(ctx, o.StateFile, v)
 	} else {

@@ -5,7 +5,7 @@ ENV GOWORK=off CGO_ENABLED=0
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -trimpath -o /out/fixture-server ./tests/fixtures/server && go build -trimpath -o /out/fixture-control ./tests/fixtures/control
+RUN fixture_digest=$(go run ./tests/fixtures/profiles/manifest) && go build -trimpath -ldflags "-X github.com/JustIkra/umir-auth/tests/fixtures/protocol.FixtureSHA256=$fixture_digest" -o /out/fixture-server ./tests/fixtures/server && go build -trimpath -o /out/fixture-control ./tests/fixtures/control
 FROM alpine:3.22 AS runtime
 ARG SOURCE_REVISION
 LABEL org.opencontainers.image.source="https://github.com/JustIkra/umir-auth" org.opencontainers.image.revision=$SOURCE_REVISION

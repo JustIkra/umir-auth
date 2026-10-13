@@ -14,28 +14,35 @@ import (
 	"syscall"
 	"time"
 
+	"sync"
+
 	"github.com/JustIkra/umir-auth/bootstrap"
 	mail "github.com/JustIkra/umir-auth/internal/adapters/mail"
 	"github.com/JustIkra/umir-auth/internal/adapters/runtimehttp"
 	"github.com/JustIkra/umir-auth/internal/adapters/timezones"
 	"github.com/JustIkra/umir-auth/internal/application"
+	"github.com/JustIkra/umir-auth/tests/fixtures/profiles"
 	"github.com/JustIkra/umir-auth/tests/fixtures/protocol"
 	"github.com/JustIkra/umir-auth/tests/mailobserver"
 )
 
 func main() {
 	var e error
-	if len(os.Args) != 2 {
-		e = errors.New("command required")
-	} else {
-		switch os.Args[1] {
-		case "serve":
-			e = serve()
-		case "healthcheck":
-			e = protocol.Healthcheck()
-		default:
-			e = errors.New("unsupported command")
+	switch {
+	case len(os.Args) == 2 && os.Args[1] == "serve":
+		e = serve("")
+	case len(os.Args) == 4 && os.Args[1] == "serve-profile" && os.Args[2] == "--profile" && protocol.AuthProfile(os.Args[3]):
+		e = serve(os.Args[3])
+	case len(os.Args) == 2 && os.Args[1] == "probe-second-writer":
+		code, err := profiles.ProbeSecondWriter()
+		if err != nil {
+			os.Exit(1)
 		}
+		os.Exit(code)
+	case len(os.Args) == 2 && os.Args[1] == "healthcheck":
+		e = protocol.Healthcheck()
+	default:
+		e = errors.New("unsupported command")
 	}
 	if e != nil {
 		if _, e = fmt.Fprintln(os.Stderr, "Auth fixture unavailable"); e != nil {
@@ -44,7 +51,7 @@ func main() {
 		os.Exit(1)
 	}
 }
-func serve() error {
+func serve(selector string) (result error) {
 	cfg, digest, e := protocol.LoadConfig(protocol.ConfigPath)
 	if e != nil {
 		return e
@@ -90,6 +97,17 @@ func serve() error {
 	if e != nil {
 		return e
 	}
+	profileDigest := ""
+	if selector != "" {
+		_, profileDigest, e = protocol.LoadProfile(cfg, selector)
+		if e != nil {
+			return e
+		}
+		clock, e = profiles.RestoreClock(selector, cfg.Project, clock)
+		if e != nil {
+			return e
+		}
+	}
 	zones, e := packagedZones()
 	if e != nil {
 		return e
@@ -101,9 +119,63 @@ func serve() error {
 	defer peers.Shutdown()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	runtime, e := bootstrap.Open(ctx, bootstrap.Options{StateFile: cfg.StateFile, SecretsDir: filepath.Join(filepath.Dir(cfg.StateFile), "secrets"), Initial: &initial.User, Password: string(password), Clock: clock, TimeZones: zones, Runtimes: peers})
+	owner, e := profiles.NewOwner(cfg, digest, profileDigest, credential, clock, zones)
 	if e != nil {
 		return e
+	}
+	socket, e := controlListener(cfg.ControlSocket)
+	if e != nil {
+		return e
+	}
+	var controlMu sync.RWMutex
+	var normalControl http.Handler
+	supervisor := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == protocol.ProfilePath {
+			owner.ServeHTTP(w, r)
+			return
+		}
+		controlMu.RLock()
+		handler := normalControl
+		controlMu.RUnlock()
+		if handler == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
+	server := &http.Server{Handler: supervisor, ReadHeaderTimeout: time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 10 * time.Second, MaxHeaderBytes: 16384}
+	controlDone := make(chan error, 1)
+	go func() { controlDone <- server.Serve(socket) }()
+	defer func() {
+		shutdown, finish := context.WithTimeout(context.Background(), 5*time.Second)
+		ce := server.Shutdown(shutdown)
+		finish()
+		if ce != nil {
+			ce = errors.Join(ce, server.Close())
+		}
+		se := <-controlDone
+		if errors.Is(se, http.ErrServerClosed) {
+			se = nil
+		}
+		result = errors.Join(result, ce, se)
+	}()
+	openContext, openCancel := context.WithTimeout(ctx, 10*time.Second)
+	options := bootstrap.Options{StateFile: cfg.StateFile, SecretsDir: filepath.Join(filepath.Dir(cfg.StateFile), "secrets"), Initial: &initial.User, Password: string(password), Clock: clock, TimeZones: zones, Runtimes: peers}
+	var runtime *bootstrap.Runtime
+	if selector != "" {
+		runtime, e = owner.Admit(openContext, selector, options)
+	} else {
+		runtime, e = bootstrap.Open(openContext, options)
+	}
+	openCancel()
+	if e != nil {
+		return e
+	}
+	if runtime == nil {
+		expired, finish := context.WithTimeout(ctx, 300*time.Second)
+		defer finish()
+		<-expired.Done()
+		return nil
 	}
 	defer func() {
 		if ce := runtime.Close(); ce != nil {
@@ -111,16 +183,29 @@ func serve() error {
 		}
 	}()
 	faults := &protocol.Faults{}
-	options := runtime.AccountOptions
-	options.Repository = &protocol.FaultRepository{Store: runtime.Store, Faults: faults}
-	runtime.Accounts, e = application.NewAccounts(ctx, options)
+	accountOptions := runtime.AccountOptions
+	accountOptions.Repository = &protocol.FaultRepository{Store: runtime.Store, Faults: faults}
+	runtime.Accounts, e = application.NewAccounts(ctx, accountOptions)
 	if e != nil {
 		return e
 	}
+	runtime.AccountOptions = accountOptions
+	if selector != "" {
+		if e = owner.Bind(ctx, runtime); e != nil {
+			return e
+		}
+	} else {
+		owner.BindOrdinary(runtime)
+	}
+	defer func() {
+		checkpointCtx, finish := context.WithTimeout(context.Background(), 5*time.Second)
+		result = errors.Join(result, owner.Checkpoint(checkpointCtx))
+		finish()
+	}()
 	if e = peers.Bind(runtime.Accounts); e != nil {
 		return e
 	}
-	handler, e := runtime.Handler(map[string]string{"gateway": keys["gateway-auth"], "serving": keys["serving-auth"], "warehouse": keys["auth-warehouse"]})
+	handler, e := runtime.Handler(map[string]string{"gateway": keys["gateway-auth"], "serving": keys["serving-auth"], "warehouse": keys["auth-warehouse"], "feedback": keys["feedback-auth"]})
 	if e != nil {
 		return e
 	}
@@ -140,31 +225,11 @@ func serve() error {
 	if e != nil {
 		return e
 	}
-	socket, e := controlListener(cfg.ControlSocket)
-	if e != nil {
-		return errors.Join(e, listener.Close())
-	}
-	server := &http.Server{Handler: control, ReadHeaderTimeout: time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 10 * time.Second, MaxHeaderBytes: 16384}
-	controlDone := make(chan error, 1)
-	go func() { controlDone <- server.Serve(socket) }()
-	controlContext, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go func() {
-		select {
-		case <-controlContext.Done():
-		case <-controlDone:
-			stop()
-		}
-	}()
-	e = runtime.Serve(ctx, listener, faults.WrapHTTP(handler), sender)
-	cancel()
-	shutdown, finish := context.WithTimeout(context.Background(), 5*time.Second)
-	ce := server.Shutdown(shutdown)
-	finish()
-	if ce != nil {
-		ce = errors.Join(ce, server.Close())
-	}
-	return errors.Join(e, ce)
+	controlMu.Lock()
+	normalControl = control
+	controlMu.Unlock()
+	serviceKeys := map[string]string{"gateway": keys["gateway-auth"], "serving": keys["serving-auth"], "warehouse": keys["auth-warehouse"], "feedback": keys["feedback-auth"]}
+	return runtime.Serve(ctx, listener, faults.WrapHTTP(owner.WrapBusiness(handler, serviceKeys)), sender)
 }
 func controlListener(path string) (net.Listener, error) {
 	parent := filepath.Dir(path)

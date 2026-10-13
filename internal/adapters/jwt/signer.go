@@ -271,3 +271,43 @@ func (s *Signer) ActivateNext() error {
 	s.next = nil
 	return nil
 }
+
+type KeyState struct {
+	Active             SigningKey
+	ActiveLastIssued   time.Time
+	Next               *PublishedKey
+	Previous           *RetainedKey
+	PreviousLastIssued time.Time
+}
+
+func (s *Signer) Snapshot(ctx context.Context) (KeyState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return KeyState{}, err
+	}
+	if _, err := s.now(); err != nil {
+		return KeyState{}, err
+	}
+	active, err := copyKey(s.active.key)
+	if err != nil {
+		return KeyState{}, err
+	}
+	out := KeyState{Active: active, ActiveLastIssued: s.active.lastIssued}
+	if s.next != nil {
+		key, err := copyKey(s.next.key)
+		if err != nil {
+			return KeyState{}, err
+		}
+		out.Next = &PublishedKey{Key: key, PublishedAt: s.next.publishedAt}
+	}
+	if s.previous != nil {
+		key, err := copyKey(s.previous.key)
+		if err != nil {
+			return KeyState{}, err
+		}
+		out.Previous = &RetainedKey{Key: key, RetainUntil: s.previous.retainUntil}
+		out.PreviousLastIssued = s.previous.lastIssued
+	}
+	return out, nil
+}
