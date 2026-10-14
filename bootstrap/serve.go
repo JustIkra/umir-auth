@@ -36,7 +36,21 @@ func (r *Runtime) Handler(keys map[string]string) (http.Handler, error) {
 	return httpapi.New(httpapi.Options{Accounts: r.Accounts, Signer: r.Signer, Clock: r.AccountOptions.Clock, Preauth: r.Preauth, ServiceKeys: keys, Ready: r.Ready})
 }
 func (r *Runtime) Serve(ctx context.Context, listener net.Listener, handler http.Handler, sender application.MailSender) error {
-	if listener == nil || handler == nil || sender == nil || r.AccountOptions.Runtimes == nil {
+	return r.ServeWithMailProcessor(ctx, listener, handler, sender, accountsMailProcessor{})
+}
+
+type MailProcessor interface {
+	ProcessMail(context.Context, *application.Accounts, application.MailSender) (bool, error)
+}
+
+type accountsMailProcessor struct{}
+
+func (accountsMailProcessor) ProcessMail(ctx context.Context, accounts *application.Accounts, sender application.MailSender) (bool, error) {
+	return accounts.ProcessMail(ctx, sender)
+}
+
+func (r *Runtime) ServeWithMailProcessor(ctx context.Context, listener net.Listener, handler http.Handler, sender application.MailSender, processor MailProcessor) error {
+	if listener == nil || handler == nil || sender == nil || processor == nil || r.AccountOptions.Runtimes == nil {
 		return ErrNotReady
 	}
 	work, cancel := context.WithCancel(ctx)
@@ -56,7 +70,7 @@ func (r *Runtime) Serve(ctx context.Context, listener net.Listener, handler http
 				return
 			case <-timer.C:
 				attempt, stop := context.WithTimeout(work, 10*time.Second)
-				_, mailErr := r.Accounts.ProcessMail(attempt, boundedMailSender{sender})
+				_, mailErr := processor.ProcessMail(attempt, r.Accounts, boundedMailSender{sender})
 				if mailErr != nil && work.Err() == nil {
 					r.failWorker(mailErr)
 					stop()

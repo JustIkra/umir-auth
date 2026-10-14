@@ -270,10 +270,43 @@ sequences. Command controls bind actual actor/org/idempotency identity and exact
 request-body digest and the candidate's normalized fingerprint through the real
 Auth ResultSecrets Digest port. They do not assign a business or delivery outcome.
 
-Only owner tests call this library at present. It has no HTTP/CLI endpoint and
-is not connected to Runtime.Serve. Do not start a competing ProcessMail caller
-beside the existing worker. Live integration requires a closed wire adapter,
-single-worker routing, and a separately qualified barrier inside SMTP IO.
+The `serve-ui-ua1` wrapper routes its single mail worker through this library.
+Bootstrap provides an additive MailProcessor port and ServeWithMailProcessor;
+ordinary Serve keeps its original signature, processor, ticker and IO limits.
+Do not start a competing ProcessMail caller beside that worker. A separately
+qualified barrier inside SMTP IO and Factory runner integration remain required.
 The owned-child process test stops real Auth after a stored sending claim and
 checks ordinary bootstrap recovery and the retained retry deadline. These source
 checks do not qualify a complete UA1 scenario, profile or final assembly.
+
+The separate unpublished wire supplement is
+`umir-ua1-mail-control-wire/0.1.0-unpublished`, binding
+`5e546ae0c4db8d215d1f889bcdef413e50d4a5269351ceb49446a960f953eccd`.
+It depends on the existing control-library and discovery bindings. The dedicated
+schema and binding are `ua1-control-wire.schema.json` and
+`ua1-control-wire.binding.json` under tests/fixtures/protocol. Production,
+ordinary serve and owner-profile modes expose no control-wire endpoint.
+
+POST /ua1-mail-controls/v1 on the private Unix socket accepts control.arm,
+control.read, control.release and control.cancel. Use the existing fixture-auth
+credential and current five-field identity. Reject extra/duplicate/null fields,
+alternate methods/paths, foreign bindings and stale identities. Limits are
+16384 request bytes, 262144 response bytes, eight calls and ten physical seconds.
+The cache retains 256 request IDs, including errors, without eviction. A retry
+of an identical request returns its original response; it is not a fresh read.
+A retained NotReady error requires a new request UUID after recovery. Reads and
+cancellation remain available after business/worker readiness loss.
+
+The fixed CLI is `fixture-control ua1-control`, with JSON on stdin and the
+existing private config/socket/credential checks. It returns redacted schema-
+validated JSON. It has no arbitrary endpoint or credential argument. Store
+controls observe the exact actual HTTP body/route and read-only Peek actor;
+the real handler retains transport, CSRF, session and scope admission. The
+client rejects wrong correlation, binding, identity, control ID, status and
+causal sequence. A hit retains its exact arm generation. ControlConflict and
+ObservationUnavailable errors have unknown control effect; a conflict can
+observe an expiry before refusal. They cannot prove that no action occurred.
+The four fixed ASCII schema patterns use strict Go regexp with the existing
+500-ms validation and 4096-match work bounds. Other schema engines stay unchanged.
+Factory consumers and runtime case
+qualification remain separate handoffs.

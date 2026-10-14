@@ -8,6 +8,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "ua1-control" {
+		if e := protocol.UA1ControlFromStdin(); e != nil {
+			fail()
+		}
+		return
+	}
 	if len(os.Args) == 4 && os.Args[1] == "profile" && os.Args[2] == "--request" && os.Args[3] == protocol.ProfileRequestPath {
 		if e := protocol.ProfileFromFile(); e != nil {
 			fail()

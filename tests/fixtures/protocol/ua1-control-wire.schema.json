@@ -1,0 +1,682 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:umir:ua1-mail-control-wire:0.1.0-unpublished",
+  "$defs": {
+    "Identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fixtureID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "instanceID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "clockGeneration": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
+        "binarySHA256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "configSHA256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "fixtureID",
+        "instanceID",
+        "clockGeneration",
+        "binarySHA256",
+        "configSHA256"
+      ]
+    },
+    "Command": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "operationID": {
+              "const": "createInvitation"
+            },
+            "commandID": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "actorID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "orgID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "bodySHA256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "operationID",
+            "commandID",
+            "actorID",
+            "orgID",
+            "bodySHA256"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "operationID": {
+              "const": "resendInvitationLink"
+            },
+            "commandID": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "actorID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "orgID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "bodySHA256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "invitationID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          "required": [
+            "operationID",
+            "commandID",
+            "actorID",
+            "orgID",
+            "bodySHA256",
+            "invitationID"
+          ]
+        }
+      ]
+    },
+    "Link": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "invitation_link"
+        },
+        "orgID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "invitationID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "jobID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      },
+      "required": [
+        "kind",
+        "orgID",
+        "invitationID",
+        "jobID"
+      ]
+    },
+    "Arm": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "controlID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "point": {
+              "enum": [
+                "storage-before-commit",
+                "storage-after-commit-unknown"
+              ]
+            },
+            "lifetimeMs": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 30000
+            },
+            "command": {
+              "$ref": "#/$defs/Command"
+            }
+          },
+          "required": [
+            "controlID",
+            "point",
+            "lifetimeMs",
+            "command"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "controlID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "point": {
+              "const": "before-process-mail"
+            },
+            "lifetimeMs": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 30000
+            }
+          },
+          "required": [
+            "controlID",
+            "point",
+            "lifetimeMs"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "controlID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "point": {
+              "enum": [
+                "after-durable-claim",
+                "after-send-before-result"
+              ]
+            },
+            "lifetimeMs": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 30000
+            },
+            "link": {
+              "$ref": "#/$defs/Link"
+            }
+          },
+          "required": [
+            "controlID",
+            "point",
+            "lifetimeMs",
+            "link"
+          ]
+        }
+      ]
+    },
+    "Request": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "supplement": {
+              "const": "umir-ua1-mail-control-wire/0.1.0-unpublished"
+            },
+            "bindingSHA256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "project": {
+              "type": "string",
+              "pattern": "^umir-backend-[0-9a-f]{24}$"
+            },
+            "requestID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "owner": {
+              "const": "auth"
+            },
+            "expected": {
+              "$ref": "#/$defs/Identity"
+            },
+            "action": {
+              "const": "control.arm"
+            },
+            "arm": {
+              "$ref": "#/$defs/Arm"
+            }
+          },
+          "required": [
+            "version",
+            "supplement",
+            "bindingSHA256",
+            "project",
+            "requestID",
+            "owner",
+            "expected",
+            "action",
+            "arm"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "supplement": {
+              "const": "umir-ua1-mail-control-wire/0.1.0-unpublished"
+            },
+            "bindingSHA256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "project": {
+              "type": "string",
+              "pattern": "^umir-backend-[0-9a-f]{24}$"
+            },
+            "requestID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "owner": {
+              "const": "auth"
+            },
+            "expected": {
+              "$ref": "#/$defs/Identity"
+            },
+            "action": {
+              "enum": [
+                "control.read",
+                "control.release",
+                "control.cancel"
+              ]
+            },
+            "controlID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          "required": [
+            "version",
+            "supplement",
+            "bindingSHA256",
+            "project",
+            "requestID",
+            "owner",
+            "expected",
+            "action",
+            "controlID"
+          ]
+        }
+      ]
+    },
+    "Record": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "supplement": {
+          "const": "umir-ua1-mail-controls/0.1.0-unpublished"
+        },
+        "bindingSHA256": {
+          "const": "a89c877bc27aed78ac5c7ebee91a77c5a0680b8fbfb79fe7cc660e2f381d5738"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^umir-backend-[0-9a-f]{24}$"
+        },
+        "owner": {
+          "const": "auth"
+        },
+        "controlID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "point": {
+          "enum": [
+            "storage-before-commit",
+            "storage-after-commit-unknown",
+            "before-process-mail",
+            "after-durable-claim",
+            "after-send-before-result"
+          ]
+        },
+        "state": {
+          "enum": [
+            "armed",
+            "hit",
+            "released",
+            "effected",
+            "expired",
+            "cancelled",
+            "identity-conflict",
+            "not-hit"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "",
+            "control-deadline",
+            "controller-cancelled",
+            "caller-cancelled",
+            "controller-closed",
+            "owner-progress-before-hit",
+            "owner-instance-changed",
+            "writer-did-not-commit",
+            "claim-observation-unavailable",
+            "claim-correlation-conflict"
+          ]
+        },
+        "hits": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "effect": {
+          "enum": [
+            "not-observed",
+            "writer-not-called",
+            "writer-return-observed",
+            "continued",
+            "cancelled"
+          ]
+        },
+        "armIdentity": {
+          "$ref": "#/$defs/Identity"
+        },
+        "hitIdentity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "releaseIdentity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effectIdentity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "armSequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "hitSequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "releaseSequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "effectSequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "aggregateRevision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "storeOutcome": {
+          "enum": [
+            "not-observed",
+            "not-called",
+            "committed",
+            "not_committed",
+            "unknown"
+          ]
+        },
+        "returnedOutcome": {
+          "enum": [
+            "not-observed",
+            "committed",
+            "not_committed",
+            "unknown"
+          ]
+        },
+        "senderResult": {
+          "enum": [
+            "not-observed",
+            "success",
+            "permanent",
+            "unknown",
+            "retryable"
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "supplement",
+        "bindingSHA256",
+        "project",
+        "owner",
+        "controlID",
+        "point",
+        "state",
+        "reason",
+        "hits",
+        "effect",
+        "armIdentity",
+        "hitIdentity",
+        "releaseIdentity",
+        "effectIdentity",
+        "armSequence",
+        "hitSequence",
+        "releaseSequence",
+        "effectSequence",
+        "attempt",
+        "storeOutcome",
+        "returnedOutcome",
+        "senderResult"
+      ]
+    },
+    "Response": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "supplement": {
+          "const": "umir-ua1-mail-control-wire/0.1.0-unpublished"
+        },
+        "bindingSHA256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^umir-backend-[0-9a-f]{24}$"
+        },
+        "requestID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "owner": {
+          "const": "auth"
+        },
+        "action": {
+          "enum": [
+            "control.arm",
+            "control.read",
+            "control.release",
+            "control.cancel"
+          ]
+        },
+        "identity": {
+          "$ref": "#/$defs/Identity"
+        },
+        "record": {
+          "$ref": "#/$defs/Record"
+        }
+      },
+      "required": [
+        "version",
+        "supplement",
+        "bindingSHA256",
+        "project",
+        "requestID",
+        "owner",
+        "action",
+        "identity",
+        "record"
+      ]
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "supplement": {
+          "const": "umir-ua1-mail-control-wire/0.1.0-unpublished"
+        },
+        "bindingSHA256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^umir-backend-[0-9a-f]{24}$"
+        },
+        "requestID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "owner": {
+          "const": "auth"
+        },
+        "action": {
+          "enum": [
+            "control.arm",
+            "control.read",
+            "control.release",
+            "control.cancel"
+          ]
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "enum": [
+                "InvalidRequest",
+                "Unauthenticated",
+                "WrongProject",
+                "IdentityConflict",
+                "ClockConflict",
+                "NotReady",
+                "ControlConflict",
+                "CapacityExceeded",
+                "CorrelationConflict",
+                "WaitExpired",
+                "NotFound",
+                "ObservationUnavailable"
+              ]
+            },
+            "effect": {
+              "enum": [
+                "none",
+                "unknown"
+              ]
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "effect",
+            "retryable"
+          ],
+          "oneOf": [
+            {
+              "properties": {
+                "code": {
+                  "enum": [
+                    "ControlConflict",
+                    "ObservationUnavailable"
+                  ]
+                },
+                "effect": {
+                  "const": "unknown"
+                }
+              }
+            },
+            {
+              "properties": {
+                "code": {
+                  "not": {
+                    "enum": [
+                      "ControlConflict",
+                      "ObservationUnavailable"
+                    ]
+                  }
+                },
+                "effect": {
+                  "const": "none"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "supplement",
+        "bindingSHA256",
+        "project",
+        "requestID",
+        "owner",
+        "action",
+        "error"
+      ]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "supplement": "umir-ua1-mail-control-wire/0.1.0-unpublished",
+  "contractSHA256": "2318af56ade77b584849b2d8213e37029c91321d8664ebd1431255c026e74cf4",
+  "schemaSHA256": "9fa708dc2f180c41bb7206d69e0877a42b6c923ca399d71c924bd968a58e9086",
+  "controlLibraryBindingSHA256": "a89c877bc27aed78ac5c7ebee91a77c5a0680b8fbfb79fe7cc660e2f381d5738",
+  "discoveryBindingSHA256": "c468cb825a3b9bfe01577485f47267f4765c95286ac08de367002e3e25f3df45"
+}

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add a separate closed UA1 control wire/CLI in serve-ui-ua1, exact actual
+  business-body/actor observation, non-evicting request replay and strict client
+  validation. Route the one mail worker through an additive bootstrap processor
+  port while preserving ordinary Serve and operational RPC signatures.
 - Add a separate test-only typed UA1 storage/mail control library with bounded
   physical lifetimes, cancellation and identity-preserving observations. Exercise
   real committed/unknown results, durable claim barriers and owned-process crash

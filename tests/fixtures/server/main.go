@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 
 	"syscall"
 	"time"
@@ -136,6 +137,7 @@ func serve(selector string) (result error) {
 	var controlMu sync.RWMutex
 	var normalControl http.Handler
 	var ua1Control http.Handler
+	var ua1MailControl http.Handler
 	supervisor := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == protocol.ProfilePath {
 			owner.ServeHTTP(w, r)
@@ -145,6 +147,9 @@ func serve(selector string) (result error) {
 		handler := normalControl
 		if uiProfile && r.URL.Path == protocol.UA1Path {
 			handler = ua1Control
+		}
+		if uiProfile && strings.HasPrefix(r.URL.Path, protocol.UA1ControlWirePath) {
+			handler = ua1MailControl
 		}
 		controlMu.RUnlock()
 		if handler == nil {
@@ -196,8 +201,21 @@ func serve(selector string) (result error) {
 		}
 	}()
 	faults := &protocol.Faults{}
+	binary, e := protocol.BinarySHA()
+	if e != nil {
+		return e
+	}
 	accountOptions := runtime.AccountOptions
 	accountOptions.Repository = &protocol.FaultRepository{Store: runtime.Store, Faults: faults}
+	var mailControls *protocol.UA1MailControls
+	if uiProfile {
+		mailControls, e = protocol.NewUA1MailControls(protocol.HandlerOptions{Project: cfg.Project, BinarySHA256: binary, ConfigSHA256: digest, Clock: clock, Store: accountOptions.Repository}, accountOptions.Results)
+		if e != nil {
+			return e
+		}
+		defer mailControls.Close()
+		accountOptions.Repository = mailControls.Repository()
+	}
 	runtime.Accounts, e = application.NewAccounts(ctx, accountOptions)
 	if e != nil {
 		return e
@@ -222,10 +240,6 @@ func serve(selector string) (result error) {
 	if e != nil {
 		return e
 	}
-	binary, e := protocol.BinarySHA()
-	if e != nil {
-		return e
-	}
 	controlOptions := protocol.HandlerOptions{Project: cfg.Project, Credential: credential, BinarySHA256: binary, ConfigSHA256: digest, Clock: clock, Store: runtime.Store, Faults: faults, Ready: func(ctx context.Context) bool { return runtime.Ready(ctx) == nil }, BootstrapID: initial.User.UserID, BindingSHA256: runtime.BindingSHA256, Initialized: runtime.Initialized}
 	control, e := protocol.NewHandler(controlOptions)
 	if e != nil {
@@ -240,18 +254,32 @@ func serve(selector string) (result error) {
 		return e
 	}
 	var uiControl http.Handler
+	var mailControl http.Handler
 	if uiProfile {
 		uiControl, e = protocol.NewUA1Handler(controlOptions)
+		if e != nil {
+			return e
+		}
+		mailControl, e = protocol.NewUA1ControlWireHandler(controlOptions, mailControls)
 		if e != nil {
 			return e
 		}
 	}
 	controlMu.Lock()
 	ua1Control = uiControl
+	ua1MailControl = mailControl
 	normalControl = control
 	controlMu.Unlock()
 	serviceKeys := map[string]string{"gateway": keys["gateway-auth"], "serving": keys["serving-auth"], "warehouse": keys["auth-warehouse"], "feedback": keys["feedback-auth"]}
-	return runtime.Serve(ctx, listener, faults.WrapHTTP(owner.WrapBusiness(handler, serviceKeys)), sender)
+	business := faults.WrapHTTP(owner.WrapBusiness(handler, serviceKeys))
+	if uiProfile {
+		business, e = mailControls.WrapBusiness(runtime.Accounts, business)
+		if e != nil {
+			return e
+		}
+		return runtime.ServeWithMailProcessor(ctx, listener, business, sender, mailControls)
+	}
+	return runtime.Serve(ctx, listener, business, sender)
 }
 func controlListener(path string) (net.Listener, error) {
 	parent := filepath.Dir(path)
