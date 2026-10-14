@@ -6,6 +6,13 @@ The implementation consumes Factory contract `2.0.0-draft.2`, approved by C2 wit
 
 ## Architecture
 
+Private Auth error responses preserve password cooldown revocation state. A
+PasswordChangeRateLimited response includes sessionRevoked even when false. Its
+positive retry delay is rounded up to seconds and returned in both details and
+Retry-After. Gateway can then clear a durably revoked session cookie and preserve
+a session that only has an active cooldown. Login throttling also preserves its
+retry delay. An unknown storage outcome does not claim a committed revocation.
+
 `internal/domain` contains typed identity records and aggregate validation. Domain code receives instants and does not read the clock, environment or filesystem. `internal/application` defines the consumer-owned repository and mechanism ports, commit outcomes, account/session and scoped membership use cases, and explicit legacy migration. `internal/adapters/jsonstore` implements that port. Adapter dependencies point toward application and domain. Fixtures and fault injection are in tests.
 
 The aggregate has `schemaVersion: 1` and a canonical positive int64 decimal `aggregateRevision` string. Its complete collections are users, organizations, restaurants, memberships, sessions, invitations, challenges, mailJobs, idempotency, lifecycleIntents and tombstones. Empty collections are arrays. Missing collections and null values are invalid.
