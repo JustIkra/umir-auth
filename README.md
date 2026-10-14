@@ -207,7 +207,7 @@ The test wrapper has a separate `POST /owner-profile/v1` endpoint on its private
 
 Auth owns the closed rotation, corrupt JSON, unknown schema, invalid aggregate, schema-v1/schema-v2 import and second-writer profiles. Preparation, private signer checkpoints, verifier/session HMAC proofs and writer probes stay under `tests/fixtures/profiles`. Only Auth generates signing keys. The general signer `Snapshot` copies private key state; `bootstrap.OpenImported` initializes an absent store from a validated aggregate and preserves its verifier. Reopen uses normal `Open`.
 
-This integration is incomplete. The approved schema-v2 fixture specifies an ordinary session from `t0-10m` to `t0+4h`. The existing aggregate validator requires exactly eight hours for ordinary sessions. Real migration rejects that fixture; this implementation preserves the refusal and does not change either requirement. Complete source/profile readiness requires a separately approved contract correction. Passing local mechanics or individual image checks does not establish owner-profile suite, J1 or E2E acceptance.
+This integration is incomplete. The corrected schema-v2 fixture preserves the real eight-hour ordinary session lifetime and the original remembered deadline. The former four-hour fixture remains rejected evidence; production migration validation was not relaxed. Current owner-profile approval and the complete eleven-run profile suite remain required. Passing local mechanics or individual image checks does not establish profile, J1 or E2E acceptance.
 
 The amended isolated backend wrapper requires a separate `feedback-auth` credential in its exact six-key transport map. Auth authenticates Feedback only for exact `GET /internal/auth/v1/jwks`; HEAD, query/path aliases, health, registry, readiness and every other route/method are forbidden. It derives caller identity from the credential. Other caller permissions remain intact. This provisioning is bound separately to discovery overlay `b2e3b3824e622d68360d73854f24920c827b9c1aefadf013241ec69262daa02f`; it does not modify base FOC binding `af215b378140b8e690523fc537007679b8c2599ed3039f7f2a0c651a64c59410` or RPC 1.1.0.
 
@@ -229,8 +229,30 @@ Startup accepts a validated v1 aggregate and commits its explicit v2 upgrade bef
 
 UA1 source tests and local qualification are separate from the historical C2 all67, owner profile, F3/F4 and J1/E/J2 evidence. Run make check, make quality-test, go mod verify and a clean go mod tidy check on the final source.
 
-The test-only fixture command serve-ui-ua1 explicitly uses its validated test-owned
-public origin for invitation links and enables loopback HTTP. Ordinary serve and
-profile selectors keep their previous configuration. Typed link-job fixture
-discovery and controlled UA1 mail/fault qualification still require a separately
-labelled supplement; no challenge edge is fabricated.
+The test-only fixture command `serve-ui-ua1` uses its validated test-owned public
+origin for invitation links and enables loopback HTTP. It exposes the separate
+`POST /ua1-fixtures/v1` discovery endpoint on the private fixture Unix socket.
+Ordinary serve, profile selectors and production have no UA1 endpoint.
+
+The unpublished supplement `umir-ua1-mail-fixtures/0.1.0-unpublished` is defined
+by `tests/fixtures/protocol/ua1.schema.json` and `ua1.binding.json`. Its exact
+binding SHA256 is `c468cb825a3b9bfe01577485f47267f4765c95286ac08de367002e3e25f3df45`.
+Use the existing fixture-auth Bearer credential, a fresh request UUID and the
+current fixture/instance/generation/binary/config identity. Link selectors use
+orgID/invitationID and optional jobID; OTP selectors use challengeID and optional
+jobID. Mixed kinds, foreign scope, unknown/duplicate fields and stale identities
+fail before a qualified result is returned.
+
+Discovery returns at most 64 complete selected rows with actual durable states,
+attempts, deadlines, link command allocation and stable synthetic Message-ID.
+It omits recipient and secret payloads. Request/response limits are 16384/262144
+bytes; physical request lifetime is ten seconds; concurrency is eight; the
+per-instance replay cache holds 256 identities without eviction. Identical
+request replay retains the original observation. A fresh state observation
+requires a fresh request ID and current owner identity.
+
+This endpoint reads the live writer's immutable aggregate. It does not run mail
+or mutate authority. A complete empty selection proves only that selected
+population. It does not prove zero mutation, enqueue or delivery. The existing
+operational RPC/schema and capabilities remain unchanged. Receiver integration,
+controlled faults/barriers and the complete UA1 qualification remain pending.

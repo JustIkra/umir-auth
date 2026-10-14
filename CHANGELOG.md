@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add a separate test-only UA1 job discovery endpoint for actual invitation-link
+  and OTP identities, durable allocation, deadlines and synthetic Message-ID.
+  Bind the reviewed supplement and current owner identity; reject mixed kinds,
+  foreign scope and stale clocks. Preserve operational RPC and production routes.
+- Correct the owner-profile README to describe the existing eight-hour legacy-v2
+  fixture while retaining the rejected four-hour evidence and pending profile gate.
+
 - Add UA1 Admin member/invitation snapshot reads and atomic invitation-link jobs.
   Preserve OTP routes, legacy command replay and original invitation deadlines.
 - Upgrade validated Auth storage v1 to v2 with explicit command profiles, typed

@@ -1,0 +1,558 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:umir:ua1-mail-fixtures:0.1.0-unpublished",
+  "$defs": {
+    "Identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fixtureID",
+        "instanceID",
+        "clockGeneration",
+        "binarySHA256",
+        "configSHA256"
+      ],
+      "properties": {
+        "fixtureID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "instanceID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "clockGeneration": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
+        "binarySHA256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "configSHA256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "InvitationLinkSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "orgID",
+        "invitationID"
+      ],
+      "properties": {
+        "kind": {
+          "const": "invitation_link"
+        },
+        "orgID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "invitationID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "jobID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      }
+    },
+    "OTPSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "challengeID"
+      ],
+      "properties": {
+        "kind": {
+          "const": "otp"
+        },
+        "challengeID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "jobID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      }
+    },
+    "CommandLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationID",
+        "commandID",
+        "actorID",
+        "aggregateRevision"
+      ],
+      "properties": {
+        "operationID": {
+          "enum": [
+            "createInvitation",
+            "resendInvitationLink"
+          ]
+        },
+        "commandID": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "actorID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "aggregateRevision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        }
+      }
+    },
+    "LinkJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jobID",
+        "state",
+        "attempts",
+        "acceptedAt",
+        "expiresAt",
+        "lastAttemptAt",
+        "nextAttemptAt",
+        "enqueueOrder",
+        "messageID",
+        "kind",
+        "anchor",
+        "command"
+      ],
+      "properties": {
+        "jobID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "sending",
+            "delivered",
+            "unknown",
+            "failed",
+            "suppressed"
+          ]
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "acceptedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^20[0-9]{2}-.*(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^20[0-9]{2}-.*(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "lastAttemptAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^20[0-9]{2}-.*(Z|[+-][0-9]{2}:[0-9]{2})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nextAttemptAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^20[0-9]{2}-.*(Z|[+-][0-9]{2}:[0-9]{2})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enqueueOrder": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messageID": {
+          "type": "string",
+          "pattern": "^<invitation\\.[0-9a-f-]{36}@umir\\.invalid>$"
+        },
+        "kind": {
+          "const": "invitation_link"
+        },
+        "anchor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "orgID",
+            "invitationID"
+          ],
+          "properties": {
+            "orgID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "invitationID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        },
+        "command": {
+          "$ref": "#/$defs/CommandLink"
+        }
+      }
+    },
+    "OTPJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jobID",
+        "state",
+        "attempts",
+        "acceptedAt",
+        "expiresAt",
+        "lastAttemptAt",
+        "nextAttemptAt",
+        "enqueueOrder",
+        "messageID",
+        "kind",
+        "anchor"
+      ],
+      "properties": {
+        "jobID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "sending",
+            "delivered",
+            "unknown",
+            "failed",
+            "suppressed"
+          ]
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "acceptedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^20[0-9]{2}-.*(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^20[0-9]{2}-.*(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "lastAttemptAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^20[0-9]{2}-.*(Z|[+-][0-9]{2}:[0-9]{2})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nextAttemptAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^20[0-9]{2}-.*(Z|[+-][0-9]{2}:[0-9]{2})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enqueueOrder": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messageID": {
+          "type": "string",
+          "pattern": "^<registration\\.[0-9a-f-]{36}\\.[0-9a-f-]{36}@umir\\.invalid>$"
+        },
+        "kind": {
+          "const": "otp"
+        },
+        "anchor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "challengeID"
+          ],
+          "properties": {
+            "challengeID": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        }
+      }
+    },
+    "Request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "supplement",
+        "bindingSHA256",
+        "project",
+        "requestID",
+        "owner",
+        "expected",
+        "action",
+        "selector"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "supplement": {
+          "const": "umir-ua1-mail-fixtures/0.1.0-unpublished"
+        },
+        "bindingSHA256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^umir-backend-[0-9a-f]{24}$"
+        },
+        "requestID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "owner": {
+          "const": "auth"
+        },
+        "expected": {
+          "$ref": "#/$defs/Identity"
+        },
+        "action": {
+          "const": "jobs.discover"
+        },
+        "selector": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/InvitationLinkSelector"
+            },
+            {
+              "$ref": "#/$defs/OTPSelector"
+            }
+          ]
+        }
+      }
+    },
+    "Response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "supplement",
+        "bindingSHA256",
+        "project",
+        "requestID",
+        "owner",
+        "identity",
+        "instant",
+        "aggregateRevision",
+        "selector",
+        "jobs",
+        "complete"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "supplement": {
+          "const": "umir-ua1-mail-fixtures/0.1.0-unpublished"
+        },
+        "bindingSHA256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^umir-backend-[0-9a-f]{24}$"
+        },
+        "requestID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "owner": {
+          "const": "auth"
+        },
+        "identity": {
+          "$ref": "#/$defs/Identity"
+        },
+        "instant": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^20[0-9]{2}-.*(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "aggregateRevision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$"
+        },
+        "selector": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/InvitationLinkSelector"
+            },
+            {
+              "$ref": "#/$defs/OTPSelector"
+            }
+          ]
+        },
+        "jobs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/LinkJob"
+              },
+              {
+                "$ref": "#/$defs/OTPJob"
+              }
+            ]
+          }
+        },
+        "complete": {
+          "const": true
+        }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "supplement",
+        "bindingSHA256",
+        "project",
+        "requestID",
+        "owner",
+        "error"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "supplement": {
+          "const": "umir-ua1-mail-fixtures/0.1.0-unpublished"
+        },
+        "bindingSHA256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^umir-backend-[0-9a-f]{24}$"
+        },
+        "requestID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "owner": {
+          "const": "auth"
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "effect",
+            "retryable"
+          ],
+          "properties": {
+            "code": {
+              "enum": [
+                "InvalidRequest",
+                "Unauthenticated",
+                "WrongProject",
+                "IdentityConflict",
+                "ClockConflict",
+                "CorrelationConflict",
+                "NotFound",
+                "CapacityExceeded",
+                "StoreUnavailable",
+                "OutcomeUnknown",
+                "WaitExpired",
+                "NotReady"
+              ]
+            },
+            "effect": {
+              "const": "none"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "LinkCorrelation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "jobID",
+        "invitationID"
+      ],
+      "properties": {
+        "kind": {
+          "const": "auth-invitation-link"
+        },
+        "jobID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "invitationID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      }
+    }
+  }
+}

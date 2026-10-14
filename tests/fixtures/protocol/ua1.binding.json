@@ -1,0 +1,12 @@
+{
+  "supplement": "umir-ua1-mail-fixtures/0.1.0-unpublished",
+  "scope": "discovery-and-correlation; full Q1 fault/barrier handoff pending",
+  "contractSHA256": "254b8b91a5db1b7030bccf3b07cc7c4b43414c0dd5660a302bfa65adcd6070e9",
+  "schemaSHA256": "25f0acbb2c0c13d6dfebbe767be2cbb98e4a65d19ca3fbe05ba3dd5880070595",
+  "c2Identity": "733e102ff0b4f52bb49d435716f9f1720642c8fad3a8a5d0685847071950e9e6",
+  "focIdentity": "1f585cce70d8aaf9422d769c1c804ccb3e7b6e0e318c383a8cedbc5cf91310de",
+  "baseBindingSHA256": "af215b378140b8e690523fc537007679b8c2599ed3039f7f2a0c651a64c59410",
+  "profileIdentity": "24c8f3a6771ed0253dbf7badfe13048c7b1686d26533ee7bcda9e9e2717b8803",
+  "caseEvidenceIdentity": "681226fc9b29ea819cdb9ec8c72a1ab8cf1836b17772eada1ece8e566baf1691",
+  "discoveryBindingSHA256": "b2e3b3824e622d68360d73854f24920c827b9c1aefadf013241ec69262daa02f"
+}

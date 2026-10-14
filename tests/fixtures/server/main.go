@@ -135,6 +135,7 @@ func serve(selector string) (result error) {
 	}
 	var controlMu sync.RWMutex
 	var normalControl http.Handler
+	var ua1Control http.Handler
 	supervisor := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == protocol.ProfilePath {
 			owner.ServeHTTP(w, r)
@@ -142,6 +143,9 @@ func serve(selector string) (result error) {
 		}
 		controlMu.RLock()
 		handler := normalControl
+		if uiProfile && r.URL.Path == protocol.UA1Path {
+			handler = ua1Control
+		}
 		controlMu.RUnlock()
 		if handler == nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -222,7 +226,8 @@ func serve(selector string) (result error) {
 	if e != nil {
 		return e
 	}
-	control, e := protocol.NewHandler(protocol.HandlerOptions{Project: cfg.Project, Credential: credential, BinarySHA256: binary, ConfigSHA256: digest, Clock: clock, Store: runtime.Store, Faults: faults, Ready: func(ctx context.Context) bool { return runtime.Ready(ctx) == nil }, BootstrapID: initial.User.UserID, BindingSHA256: runtime.BindingSHA256, Initialized: runtime.Initialized})
+	controlOptions := protocol.HandlerOptions{Project: cfg.Project, Credential: credential, BinarySHA256: binary, ConfigSHA256: digest, Clock: clock, Store: runtime.Store, Faults: faults, Ready: func(ctx context.Context) bool { return runtime.Ready(ctx) == nil }, BootstrapID: initial.User.UserID, BindingSHA256: runtime.BindingSHA256, Initialized: runtime.Initialized}
+	control, e := protocol.NewHandler(controlOptions)
 	if e != nil {
 		return e
 	}
@@ -234,7 +239,15 @@ func serve(selector string) (result error) {
 	if e != nil {
 		return e
 	}
+	var uiControl http.Handler
+	if uiProfile {
+		uiControl, e = protocol.NewUA1Handler(controlOptions)
+		if e != nil {
+			return e
+		}
+	}
 	controlMu.Lock()
+	ua1Control = uiControl
 	normalControl = control
 	controlMu.Unlock()
 	serviceKeys := map[string]string{"gateway": keys["gateway-auth"], "serving": keys["serving-auth"], "warehouse": keys["auth-warehouse"], "feedback": keys["feedback-auth"]}
