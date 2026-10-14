@@ -221,6 +221,8 @@ func failure(w http.ResponseWriter, e error) {
 		status, code, outcome = 429, "PasswordChangeRateLimited", "not_committed"
 	case errors.Is(e, application.ErrChallengeRateLimited):
 		status, code, outcome = 429, "RateLimited", "not_committed"
+	case errors.Is(e, application.ErrDeliveryUnavailable):
+		status, code, outcome = 503, "DeliveryUnavailable", "not_committed"
 	case errors.Is(e, application.ErrChallengeLocked):
 		status, code, outcome = 400, "ChallengeLocked", "not_committed"
 	case errors.Is(e, application.ErrChallengeInvalidCode):
@@ -249,12 +251,15 @@ func failure(w http.ResponseWriter, e error) {
 	}{Code: code, Outcome: outcome, Message: "Request could not be completed"}
 	var passwordLimit *application.PasswordChangeLimitError
 	var loginLimit *application.RateLimitError
+	var invitationLimit *application.InvitationRateLimitError
 	var delay time.Duration
 	if errors.As(e, &passwordLimit) {
 		result.SessionRevoked = &passwordLimit.SessionRevoked
 		delay = passwordLimit.RetryAfter
 	} else if errors.As(e, &loginLimit) {
 		delay = loginLimit.RetryAfter
+	} else if errors.As(e, &invitationLimit) {
+		delay = invitationLimit.RetryAfter
 	}
 	if delay > 0 {
 		seconds := int((delay-1)/time.Second) + 1

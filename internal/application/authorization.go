@@ -75,7 +75,7 @@ func UserTokenPolicy(operation string) (TokenPolicy, bool) {
 		capability = "catalog.write"
 	case "receiveDelivery":
 		capability = "delivery.create"
-	case "inventory", "expiringBatches", "history", "pendingWriteoffs":
+	case "inventory", "expiringBatches", "history", "pendingWriteoffs", "productBatches":
 		capability = "stock.read"
 	case "confirmWriteoff", "resolveWriteoffCommand":
 		capability = "writeoff.confirm"

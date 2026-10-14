@@ -44,6 +44,20 @@ func main() {
 	if err := os.WriteFile("tests/email/registration-preview.txt", []byte(rendered.Text), 0o600); err != nil {
 		log.Fatal(err)
 	}
+	link, err := template.RenderInvitationLink(application.InvitationLinkMail{
+		InvitationID: "11111111-1111-4111-8111-111111111111", Email: "preview@example.invalid",
+		URL: "https://ui.example.invalid/invite/11111111-1111-4111-8111-111111111111", CreatedAt: createdAt, ExpiresAt: createdAt.Add(7 * 24 * time.Hour),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	linkPreview := strings.Replace(link.HTML, "cid:"+link.LogoContentID, "data:image/png;base64,"+base64.StdEncoding.EncodeToString(link.LogoPNG), 1)
+	if err := os.WriteFile("tests/email/invitation-preview.html", []byte(linkPreview), 0o600); err != nil {
+		log.Fatal(err)
+	}
+	if err := os.WriteFile("tests/email/invitation-preview.txt", []byte(link.Text), 0o600); err != nil {
+		log.Fatal(err)
+	}
 
 	oversizeTemplate, err := mailadapter.NewRegistrationTemplate(mailadapter.RegistrationMailConfig{
 		OperatorName:    "ООО «Северный региональный оператор долгосрочного обслуживания»",

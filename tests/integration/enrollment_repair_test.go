@@ -57,6 +57,7 @@ func TestA4RepairAcceptancePreservesQueuedEmailDelivery(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				e.advance(t, 9*time.Minute)
 				queued, err := e.accounts.BeginEmailChallenge(ctx, e.actor, application.EmailChallengeInput{CommandID: "repair-queued-email", Email: created.User.Email, Purpose: purpose})
 				if err != nil {
 					t.Fatal(err)
@@ -68,6 +69,7 @@ func TestA4RepairAcceptancePreservesQueuedEmailDelivery(t *testing.T) {
 					t.Fatal(err)
 				}
 				actor := application.ChallengeActor{Token: created.Token, CSRFToken: created.CSRFToken}
+				e.advance(t, time.Minute)
 				challenge, err := e.accounts.BeginInvitationChallenge(ctx, actor, application.ChallengeBeginInput{CommandID: "repair-accept-begin", InvitationID: invite.InvitationID})
 				if err != nil {
 					t.Fatal(err)

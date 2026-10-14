@@ -46,6 +46,17 @@ func (s *RegistrationSMTP) Send(ctx context.Context, delivery application.MailDe
 	if s == nil || s.smtp == nil || s.template == nil || s.now == nil || s.transport == nil {
 		return permanentSMTP("smtp_invalid_registration_mail")
 	}
+	if delivery.Link != nil {
+		if !s.now().Before(delivery.Link.ExpiresAt) {
+			return permanentSMTP("smtp_invitation_expired")
+		}
+		message, err := s.linkMessage(delivery)
+		if err != nil {
+			return permanentSMTP("smtp_invalid_invitation_mail")
+		}
+		defer clear(message)
+		return s.transport.Deliver(ctx, delivery, message)
+	}
 	if !s.now().Before(codeMail.ExpiresAt) {
 		return permanentSMTP("smtp_registration_expired")
 	}
@@ -62,6 +73,11 @@ func (s *RegistrationSMTP) message(codeMail application.CodeMail) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
+	messageID := "<registration." + string(codeMail.ChallengeID) + "." + string(codeMail.IssuanceID) + "@" + s.smtp.domain + ">"
+	return s.renderedMessage(codeMail.Email, messageID, rendered)
+}
+
+func (s *RegistrationSMTP) renderedMessage(recipient, messageID string, rendered RegistrationMessage) ([]byte, error) {
 	var alternative bytes.Buffer
 	alt := multipart.NewWriter(&alternative)
 	if err := writeRegistrationTextPart(alt, "text/plain; charset=utf-8", rendered.Text); err != nil {
@@ -102,8 +118,7 @@ func (s *RegistrationSMTP) message(codeMail application.CodeMail) ([]byte, error
 	}
 
 	from := mail.Address{Name: s.template.config.SenderName, Address: s.smtp.from.Address}
-	to := mail.Address{Address: codeMail.Email}
-	messageID := "<registration." + string(codeMail.ChallengeID) + "." + string(codeMail.IssuanceID) + "@" + s.smtp.domain + ">"
+	to := mail.Address{Address: recipient}
 	subject := mime.QEncoding.Encode("UTF-8", rendered.Subject)
 	contentType := fmt.Sprintf(`multipart/related; type="multipart/alternative"; boundary=%q`, related.Boundary())
 	var message bytes.Buffer

@@ -77,10 +77,24 @@ func enrollmentCommand[T any](s *Accounts, ctx context.Context, actor ChallengeA
 			return zero, ErrAuthUnavailable
 		}
 		initiator := who.initiator
-		if operation == "createInvitation" || operation == "cancelInvitation" || operation == "resendInvitation" {
+		if operation == "createInvitation" || operation == "cancelInvitation" || operation == "resendInvitation" || operation == "resendInvitationLink" {
 			initiator = ""
 		}
-		tuple, err := json.Marshal(struct{ Version, Operation, Actor, Initiator, Org, Input string }{"1", operation, string(who.user.UserID), initiator, string(org), digest})
+		profile := "C2"
+		if operation == "createInvitation" || operation == "resendInvitationLink" {
+			profile = "UA1"
+		}
+		for _, r := range a.Idempotency {
+			if r.ActorID == who.user.UserID && r.PreauthDigest == who.preauth && r.OperationID == operation && r.OrgID == org && r.RestaurantID == "" && r.CommandID == command {
+				profile = r.ContractProfile
+				break
+			}
+		}
+		version := "1"
+		if profile == "UA1" {
+			version = "UA1"
+		}
+		tuple, err := json.Marshal(struct{ Version, Operation, Actor, Initiator, Org, Input string }{version, operation, string(who.user.UserID), initiator, string(org), digest})
 		if err != nil {
 			return zero, ErrAuthUnavailable
 		}
@@ -147,7 +161,7 @@ func enrollmentCommand[T any](s *Accounts, ctx context.Context, actor ChallengeA
 		if changed.jobs == nil {
 			changed.jobs = []domain.EntityID{}
 		}
-		a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{ActorID: who.user.UserID, PreauthDigest: who.preauth, OperationID: operation, OrgID: org, CommandID: command, Fingerprint: fp, AggregateRevision: rev, HTTPStatus: storedStatus, ResponseSchema: storedSchema, EncryptedResponse: sealed, JobIDs: changed.jobs, RecordedAt: formatInstant(s.opts.Clock.Now())})
+		a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{ContractProfile: profile, ActorID: who.user.UserID, PreauthDigest: who.preauth, OperationID: operation, OrgID: org, CommandID: command, Fingerprint: fp, AggregateRevision: rev, HTTPStatus: storedStatus, ResponseSchema: storedSchema, EncryptedResponse: sealed, JobIDs: changed.jobs, RecordedAt: formatInstant(s.opts.Clock.Now())})
 		if err := s.commit(ctx, a); err != nil {
 			if errors.Is(err, ErrRevisionConflict) && !s.recovering {
 				continue

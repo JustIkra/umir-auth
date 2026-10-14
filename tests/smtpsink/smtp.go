@@ -82,10 +82,10 @@ func newSMTPTestServerWithAuth(t *testing.T, mode string, finalCode int, preTLSA
 	}
 	server := &smtpTestServer{
 		port:         smtpTestPort(t, listener),
-		messages:     make(chan string, 1),
-		auth:         make(chan string, 1),
-		authCommands: make(chan string, 2),
-		rcpt:         make(chan string, 1),
+		messages:     make(chan string, 128),
+		auth:         make(chan string, 128),
+		authCommands: make(chan string, 128),
+		rcpt:         make(chan string, 128),
 	}
 	t.Cleanup(func() { closeQuietly(listener) })
 	go func() {

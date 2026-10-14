@@ -24,7 +24,7 @@ var (
 	registrationMSK         = loadRegistrationMSK()
 )
 
-//go:embed templates/registration.html.tmpl assets/registration-logo@2x.png
+//go:embed templates/registration.html.tmpl templates/invitation_link.html.tmpl assets/registration-logo@2x.png
 var registrationAssets embed.FS
 
 type RegistrationMailConfig struct {
@@ -47,6 +47,7 @@ type RegistrationMessage struct {
 type RegistrationTemplate struct {
 	config RegistrationMailConfig
 	tmpl   *template.Template
+	link   *template.Template
 	logo   []byte
 }
 
@@ -69,7 +70,15 @@ func NewRegistrationTemplate(config RegistrationMailConfig) (*RegistrationTempla
 	if err != nil {
 		return nil, err
 	}
-	return &RegistrationTemplate{config: config, tmpl: tmpl, logo: logo}, nil
+	linkMarkup, err := registrationAssets.ReadFile("templates/invitation_link.html.tmpl")
+	if err != nil {
+		return nil, err
+	}
+	link, err := template.New("invitation-link").Parse(string(linkMarkup))
+	if err != nil {
+		return nil, err
+	}
+	return &RegistrationTemplate{config: config, tmpl: tmpl, link: link, logo: logo}, nil
 }
 
 func (t *RegistrationTemplate) Render(mail application.CodeMail) (RegistrationMessage, error) {

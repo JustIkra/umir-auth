@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
-    "title": "Umir backend private candidate",
-    "version": "2.0.0-draft.2",
-    "description": "Private only. Auth-only issuer. Caller transport authentication and JWT ACL both required. backend-v2.md is normative."
+    "title": "Umir UA1 composed private profile",
+    "version": "2.0.0-UA1.1",
+    "description": "Generated additive UA1 profile. Original C2 artifacts and acceptance remain separate."
   },
   "servers": [
     {
@@ -5160,10 +5160,10 @@
     },
     "/internal/auth/v1/public/orgs/{orgID}/invitations": {
       "post": {
-        "operationId": "authFacadecreateInvitation",
+        "operationId": "privateCreateInvitation",
         "x-owner": "Auth",
         "x-required-capability": "invitation.manage",
-        "description": "See backend-v2.md for atomicity, authorization and outcomes.",
+        "description": "UA1 create-mail atomicity is defined in ../ui-api-amendment.md. Predecessor outcome rules remain in backend-v2.md.",
         "responses": {
           "201": {
             "description": "Typed successful result. Acceptance is not delivery or cleanup completion.",
@@ -5198,25 +5198,107 @@
           {
             "name": "X-Umir-Session",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
               "type": "string",
               "minLength": 1
             }
           },
           {
-            "name": "X-Umir-Preauth",
+            "name": "X-Umir-Activity",
             "in": "header",
             "required": false,
             "schema": {
               "type": "string",
-              "minLength": 1
+              "enum": [
+                "foreground",
+                "background"
+              ]
             }
           },
           {
             "name": "X-Umir-CSRF-Token",
             "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInvitation"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "serviceKey": []
+          }
+        ],
+        "x-ua1-semantic-change": "Fresh create atomically saves one invitation_link job; legacy exact replay keeps its zero-job result."
+      },
+      "get": {
+        "operationId": "privateOrganizationInvitations",
+        "x-owner": "Auth",
+        "x-required-capability": "invitation.manage",
+        "description": "UA1 draft; semantics and cross-field bindings are in ../ui-api-amendment.md.",
+        "parameters": [
+          {
+            "name": "orgID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EntityID"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
             "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "accepted",
+                "expired",
+                "revoked",
+                "suppressed",
+                "all"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "name": "X-Umir-Session",
+            "in": "header",
+            "required": true,
             "schema": {
               "type": "string",
               "minLength": 1
@@ -5235,12 +5317,24 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateInvitation"
+        "responses": {
+          "200": {
+            "description": "Typed result. Capture time and identity apply to all rows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationsPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Existing typed failure rules apply.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           }
@@ -6389,6 +6483,275 @@
             "example": "44444444-4444-4444-8444-444444444444"
           }
         ]
+      }
+    },
+    "/internal/warehouse/v2/r/{restaurantID}/products/{productID}/batches": {
+      "get": {
+        "operationId": "privateProductBatches",
+        "x-owner": "warehouse",
+        "x-required-capability": "stock.read",
+        "description": "UA1 draft; semantics and cross-field bindings are in ../ui-api-amendment.md.",
+        "parameters": [
+          {
+            "name": "restaurantID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EntityID"
+            }
+          },
+          {
+            "name": "productID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ID"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed result. Capture time and identity apply to all rows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedProductBatches"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Existing typed failure rules apply.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "serviceKey": [],
+            "serviceJWT": []
+          }
+        ]
+      }
+    },
+    "/internal/auth/v1/public/orgs/{orgID}/members": {
+      "get": {
+        "operationId": "privateOrganizationMembers",
+        "x-owner": "Auth",
+        "x-required-capability": "membership.manage",
+        "description": "UA1 draft; semantics and cross-field bindings are in ../ui-api-amendment.md.",
+        "parameters": [
+          {
+            "name": "orgID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EntityID"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "revoked",
+                "all"
+              ],
+              "default": "active"
+            }
+          },
+          {
+            "name": "X-Umir-Session",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-Umir-Activity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "foreground",
+                "background"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed result. Capture time and identity apply to all rows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembersPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Existing typed failure rules apply.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "serviceKey": []
+          }
+        ]
+      }
+    },
+    "/internal/auth/v1/public/orgs/{orgID}/invitations/{invitationID}/resend-link": {
+      "post": {
+        "operationId": "privateResendInvitationLink",
+        "x-owner": "Auth",
+        "x-required-capability": "invitation.manage",
+        "description": "UA1 draft; semantics and cross-field bindings are in ../ui-api-amendment.md.",
+        "parameters": [
+          {
+            "name": "orgID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EntityID"
+            }
+          },
+          {
+            "name": "invitationID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EntityID"
+            }
+          },
+          {
+            "name": "X-Umir-Session",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-Umir-Activity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "foreground",
+                "background"
+              ]
+            }
+          },
+          {
+            "name": "X-Umir-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exactly one link job was durably accepted; not proof of SMTP delivery.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DurableResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Existing typed failure rules apply.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "serviceKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Command"
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -13141,7 +13504,234 @@
             "description": "Readiness for one explicit restaurant and service, bound to lifecycleVersion and exact peer epoch. Registry envelope restaurantID and runtime route restaurantID must agree with this value."
           }
         ]
+      },
+      "PositiveBatch": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BatchV2"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "remainingQuantity": {
+                "$ref": "#/components/schemas/PositiveQuantity"
+              }
+            }
+          }
+        ]
+      },
+      "ProductBatchRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "batch",
+          "baseUnit",
+          "status"
+        ],
+        "properties": {
+          "batch": {
+            "$ref": "#/components/schemas/PositiveBatch"
+          },
+          "baseUnit": {
+            "$ref": "#/components/schemas/BaseUnit"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "pending_writeoff"
+            ]
+          }
+        }
+      },
+      "ProductBatchPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "productID",
+          "evaluatedAt",
+          "page",
+          "items"
+        ],
+        "properties": {
+          "productID": {
+            "$ref": "#/components/schemas/ID"
+          },
+          "evaluatedAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageIdentity"
+          },
+          "items": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/ProductBatchRow"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "ScopedProductBatches": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "context",
+          "result"
+        ],
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/BusinessContext"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ProductBatchPage"
+          }
+        }
+      },
+      "AuthPageIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orgID",
+          "readerEpoch",
+          "aggregateRevision",
+          "evaluatedAt"
+        ],
+        "properties": {
+          "orgID": {
+            "$ref": "#/components/schemas/EntityID"
+          },
+          "readerEpoch": {
+            "$ref": "#/components/schemas/Epoch"
+          },
+          "aggregateRevision": {
+            "$ref": "#/components/schemas/Version"
+          },
+          "evaluatedAt": {
+            "$ref": "#/components/schemas/Instant"
+          }
+        }
+      },
+      "MemberContact": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "membership",
+          "displayName",
+          "email"
+        ],
+        "properties": {
+          "membership": {
+            "$ref": "#/components/schemas/Membership"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          },
+          "email": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Email"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MembersPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "context",
+          "items"
+        ],
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/AuthPageIdentity"
+          },
+          "items": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/MemberContact"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "InvitationListRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "invitation",
+          "linkDelivery",
+          "resendAllowed"
+        ],
+        "properties": {
+          "invitation": {
+            "$ref": "#/components/schemas/Invitation"
+          },
+          "linkDelivery": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MailJob"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resendAllowed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "InvitationsPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "context",
+          "items"
+        ],
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/AuthPageIdentity"
+          },
+          "items": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/InvitationListRow"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
       }
     }
+  },
+  "x-ua1-source": {
+    "backend-v2-public.json": "e710150288d650965cfee80b7cb623f5466583c03da9edf5561f94d127970897",
+    "backend-v2-private.json": "f1a46a199c5c616523ff24ed0c43a0ae92b43edd93e1264a854fd766030aa1c1",
+    "ui-amendment-v1-public.json": "7d18daa682846059b599b04f6bf85c96040ad6c409d33909a8c0ccce2c9c49be",
+    "ui-amendment-v1-private.json": "432dce1c4619bd5038db51f54df266e5607a464b22c27581604b58025fddf55c"
   }
 }

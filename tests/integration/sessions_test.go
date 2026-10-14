@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -366,7 +367,11 @@ func TestStaleCredentialAndCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	next := a.Snapshot()
-	next.AggregateRevision = "35"
+	revision, ok := domain.VersionNumber(a.Revision())
+	if !ok {
+		t.Fatal("invalid captured revision")
+	}
+	next.AggregateRevision = domain.Version(strconv.FormatInt(revision+1, 10))
 	next.Users[0].CredentialVersion = "2"
 	if _, err := r.Commit(ctx, a.Revision(), validate(t, next)); err != nil {
 		t.Fatal(err)

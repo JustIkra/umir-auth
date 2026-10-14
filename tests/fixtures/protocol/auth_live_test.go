@@ -48,6 +48,7 @@ func liveOwner(t *testing.T) (*bootstrap.Runtime, *Clock, bootstrap.Options) {
 		t.Fatal(e)
 	}
 	o := bootstrap.Options{StateFile: filepath.Join(dir, "auth.json"), SecretsDir: filepath.Join(dir, "secrets"), Password: "0123456789abcdef0123456789abcdef", Initial: &bootstrap.InitialUser{UserID: "11111111-1111-4111-8111-111111111111", Login: "e2e.initial", DisplayName: "E2E Initial Operator", CredentialVersion: "1"}, Clock: clock, TimeZones: zones, Runtimes: localPeers{}}
+	o.InvitationMail = application.InvitationMailOptions{FrontendOrigin: "https://app.umir.invalid"}
 	r, e := bootstrap.Open(ctx, o)
 	if e != nil {
 		t.Fatal(e)

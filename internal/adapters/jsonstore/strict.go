@@ -32,6 +32,28 @@ func decode(data []byte) (domain.ValidatedAggregate, error) {
 	if err := d.Decode(&a); err != nil {
 		return domain.ValidatedAggregate{}, err
 	}
+	if a.SchemaVersion == 1 {
+		var legacy struct {
+			MailJobs    []map[string]json.RawMessage `json:"mailJobs"`
+			Idempotency []map[string]json.RawMessage `json:"idempotency"`
+		}
+		if err := json.Unmarshal(data, &legacy); err != nil {
+			return domain.ValidatedAggregate{}, err
+		}
+		for _, j := range legacy.MailJobs {
+			if _, exists := j["purpose"]; exists {
+				return domain.ValidatedAggregate{}, domain.ErrInvalidAggregate
+			}
+			if _, exists := j["enqueueOrder"]; exists {
+				return domain.ValidatedAggregate{}, domain.ErrInvalidAggregate
+			}
+		}
+		for _, r := range legacy.Idempotency {
+			if _, exists := r["contractProfile"]; exists {
+				return domain.ValidatedAggregate{}, domain.ErrInvalidAggregate
+			}
+		}
+	}
 	v, err := domain.Validate(a)
 	if err != nil {
 		return domain.ValidatedAggregate{}, err

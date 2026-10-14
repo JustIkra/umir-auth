@@ -70,6 +70,6 @@ func saveMembershipResult[T membershipResult](s *Accounts, a *domain.Aggregate, 
 	if err != nil {
 		return err
 	}
-	a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{ActorID: actor, OperationID: operation, OrgID: orgID, CommandID: commandID, Fingerprint: fp, AggregateRevision: revision, HTTPStatus: 200, ResponseSchema: schema, EncryptedResponse: sealed, JobIDs: []domain.EntityID{}})
+	a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{ContractProfile: "C2", ActorID: actor, OperationID: operation, OrgID: orgID, CommandID: commandID, Fingerprint: fp, AggregateRevision: revision, HTTPStatus: 200, ResponseSchema: schema, EncryptedResponse: sealed, JobIDs: []domain.EntityID{}})
 	return nil
 }

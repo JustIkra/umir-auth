@@ -253,7 +253,7 @@ func (s *Accounts) LogoutAllCommand(ctx context.Context, token, command string) 
 	if e != nil {
 		return DurableResult{}, ErrAuthUnavailable
 	}
-	a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{ActorID: u.UserID, OperationID: "logoutAll", CommandID: command, Fingerprint: fp, AggregateRevision: rev, HTTPStatus: 200, ResponseSchema: "DurableResult", EncryptedResponse: sealed, JobIDs: []domain.EntityID{}})
+	a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{ContractProfile: "C2", ActorID: u.UserID, OperationID: "logoutAll", CommandID: command, Fingerprint: fp, AggregateRevision: rev, HTTPStatus: 200, ResponseSchema: "DurableResult", EncryptedResponse: sealed, JobIDs: []domain.EntityID{}})
 	e = s.commit(ctx, a)
 	return v, e
 }

@@ -13,10 +13,20 @@ func commandIdentity(r IdempotencyRecord) commandKey {
 	return commandKey{r.ActorID, r.PreauthDigest, r.OperationID, r.OrgID, r.RestaurantID, r.CommandID}
 }
 func sameCommand(a, b IdempotencyRecord) bool {
-	return commandIdentity(a) == commandIdentity(b) && a.Fingerprint == b.Fingerprint && a.AggregateRevision == b.AggregateRevision && a.HTTPStatus == b.HTTPStatus && a.ResponseSchema == b.ResponseSchema && a.EncryptedResponse == b.EncryptedResponse && a.RecordedAt == b.RecordedAt && slices.Equal(a.JobIDs, b.JobIDs)
+	return commandIdentity(a) == commandIdentity(b) && a.ContractProfile == b.ContractProfile && a.Fingerprint == b.Fingerprint && a.AggregateRevision == b.AggregateRevision && a.HTTPStatus == b.HTTPStatus && a.ResponseSchema == b.ResponseSchema && a.EncryptedResponse == b.EncryptedResponse && a.RecordedAt == b.RecordedAt && slices.Equal(a.JobIDs, b.JobIDs)
 }
 func ValidateReplacement(previous, next ValidatedAggregate) error {
 	before, after := previous.data, next.data
+	if before.SchemaVersion != after.SchemaVersion {
+		if before.SchemaVersion != 1 || after.SchemaVersion != 2 {
+			return ErrInvalidAggregate
+		}
+		var err error
+		before, err = UpgradeV1(before)
+		if err != nil {
+			return err
+		}
+	}
 	if err := ValidateMembershipReplacement(before, after); err != nil {
 		return err
 	}
@@ -94,7 +104,7 @@ func ValidateReplacement(previous, next ValidatedAggregate) error {
 	}
 	for _, j := range before.MailJobs {
 		n, ok := jobs[j.JobID]
-		if !ok || j.ChallengeID != n.ChallengeID || j.OrgID != n.OrgID || j.InvitationID != n.InvitationID || j.AcceptedAt != n.AcceptedAt || j.EncryptedPayload != n.EncryptedPayload && (n.EncryptedPayload != "" || !oneOf(n.State, "delivered", "failed", "suppressed")) || n.Attempts < j.Attempts || oneOf(j.State, "delivered", "failed", "suppressed") && n.State != j.State {
+		if !ok || j.Purpose != n.Purpose || j.EnqueueOrder != n.EnqueueOrder || j.ChallengeID != n.ChallengeID || j.OrgID != n.OrgID || j.InvitationID != n.InvitationID || j.AcceptedAt != n.AcceptedAt || j.EncryptedPayload != n.EncryptedPayload && (n.EncryptedPayload != "" || !oneOf(n.State, "delivered", "failed", "suppressed")) || n.Attempts < j.Attempts || oneOf(j.State, "delivered", "failed", "suppressed") && n.State != j.State {
 			return ErrInvalidAggregate
 		}
 	}

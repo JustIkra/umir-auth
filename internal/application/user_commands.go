@@ -67,6 +67,6 @@ func (s *Accounts) saveUserResult(a *domain.Aggregate, actor domain.EntityID, op
 	if err != nil {
 		return ErrAuthUnavailable
 	}
-	a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{ActorID: actor, OperationID: operation, CommandID: commandID, Fingerprint: fp, AggregateRevision: revision, HTTPStatus: status, ResponseSchema: schema, EncryptedResponse: sealed, JobIDs: []domain.EntityID{}})
+	a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{ContractProfile: "C2", ActorID: actor, OperationID: operation, CommandID: commandID, Fingerprint: fp, AggregateRevision: revision, HTTPStatus: status, ResponseSchema: schema, EncryptedResponse: sealed, JobIDs: []domain.EntityID{}})
 	return nil
 }

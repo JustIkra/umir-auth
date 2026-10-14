@@ -113,7 +113,16 @@ func (s *Accounts) CreateInvitation(ctx context.Context, token, csrf string, org
 			return invitationScope(a, domain.Invitation{OrgID: org, Assignments: assignments})
 		},
 		func(a *domain.Aggregate, _ enrollmentActor) (enrollmentChange[domain.Invitation], error) {
+			if s.opts.LinkURLs == nil {
+				return enrollmentChange[domain.Invitation]{}, ErrDeliveryUnavailable
+			}
+			if _, err := s.opts.LinkURLs.Origin(s.opts.InvitationMail); err != nil {
+				return enrollmentChange[domain.Invitation]{}, err
+			}
 			now := s.opts.Clock.Now()
+			if err := s.issueLimit(*a, comparison, now); err != nil {
+				return enrollmentChange[domain.Invitation]{}, err
+			}
 			recent := 0
 			for i := range a.Invitations {
 				old := &a.Invitations[i]
@@ -145,7 +154,11 @@ func (s *Accounts) CreateInvitation(ctx context.Context, token, csrf string, org
 			}
 			v := domain.Invitation{InvitationID: id, OrgID: org, Email: email, ComparisonEmail: comparison, Assignments: assignments, ExpiresAt: formatInstant(now.Add(7 * 24 * time.Hour)), ResendAvailableAt: formatInstant(now.Add(time.Minute)), State: "pending", Version: "1"}
 			a.Invitations = append(a.Invitations, v)
-			return enrollmentChange[domain.Invitation]{value: v}, nil
+			job, err := s.enqueueInvitationLink(a, v)
+			if err != nil {
+				return enrollmentChange[domain.Invitation]{}, err
+			}
+			return enrollmentChange[domain.Invitation]{value: v, jobs: []domain.EntityID{job}}, nil
 		})
 }
 func suppressInvitationJobs(a *domain.Aggregate, id domain.EntityID) {

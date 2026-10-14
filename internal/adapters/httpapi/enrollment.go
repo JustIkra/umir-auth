@@ -8,6 +8,9 @@ import (
 )
 
 func (h *handler) enrollmentRoutes() {
+	bind(h, "POST /internal/auth/v1/public/orgs/{orgID}/invitations/{invitationID}/resend-link", 200, func(r *http.Request, in command) (application.DurableResult, error) {
+		return h.o.Accounts.ResendInvitationLink(r.Context(), session(r), csrf(r), pathID(r, "orgID"), pathID(r, "invitationID"), in.CommandID)
+	})
 	bind(h, "POST /internal/auth/v1/public/orgs/{orgID}/invitations", 201, func(r *http.Request, in application.CreateInvitationInput) (domain.Invitation, error) {
 		return h.o.Accounts.CreateInvitation(r.Context(), session(r), csrf(r), pathID(r, "orgID"), in)
 	})

@@ -18,7 +18,16 @@ type CodeMail struct {
 type MailDelivery struct {
 	JobID domain.EntityID
 	Mail  CodeMail
+	Link  *InvitationLinkMail
 }
+
+func (d MailDelivery) Recipient() string {
+	if d.Link != nil {
+		return d.Link.Email
+	}
+	return d.Mail.Email
+}
+
 type DeliveryResult struct {
 	Success, Permanent, Unknown bool
 	Code                        string
@@ -43,6 +52,16 @@ func (s *Accounts) enqueueChallenge(a *domain.Aggregate, c domain.Challenge, ema
 		return "", ErrAuthUnavailable
 	}
 	j := domain.MailJob{JobID: id, ChallengeID: c.ChallengeID, InvitationID: c.InvitationID, State: "queued", EncryptedPayload: sealed, AcceptedAt: formatInstant(s.opts.Clock.Now()), NextAttemptAt: formatInstant(s.opts.Clock.Now())}
+	if a.SchemaVersion == 2 {
+		j.Purpose = "otp"
+		j.EnqueueOrder = "1"
+		if len(a.MailJobs) > 0 {
+			j.EnqueueOrder, err = nextVersion(a.MailJobs[len(a.MailJobs)-1].EnqueueOrder)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
 	if c.InvitationID != "" {
 		i, err := invitationIndex(*a, c.InvitationID)
 		if err != nil {
@@ -80,6 +99,9 @@ func (s *Accounts) RecoverMail(ctx context.Context) error {
 					return ErrAuthUnavailable
 				}
 				j.NextAttemptAt = formatInstant(last.Add(mailDelay(j.Attempts)))
+				if j.Purpose == "invitation_link" && j.Attempts >= 3 {
+					j.NextAttemptAt = ""
+				}
 				changed = true
 			}
 		}
@@ -126,6 +148,8 @@ func (s *Accounts) ProcessMail(ctx context.Context, sender MailSender) (bool, er
 			switch {
 			case result.Success:
 				j.State = "delivered"
+			case result.Unknown && j.Purpose == "invitation_link":
+				j.State = "unknown"
 			case result.Permanent || j.Attempts >= 3:
 				j.State = "failed"
 			case result.Unknown:
@@ -135,6 +159,8 @@ func (s *Accounts) ProcessMail(ctx context.Context, sender MailSender) (bool, er
 			}
 			if j.State == "delivered" || j.State == "failed" {
 				j.EncryptedPayload = ""
+				j.NextAttemptAt = ""
+			} else if j.Purpose == "invitation_link" && j.State == "unknown" && j.Attempts >= 3 {
 				j.NextAttemptAt = ""
 			} else {
 				last, err := time.Parse(time.RFC3339Nano, string(j.LastAttemptAt))
@@ -195,7 +221,7 @@ func (s *Accounts) SweepEnrollment(ctx context.Context) error {
 		return err
 	}
 }
-func validateEnrollmentSecrets(a domain.Aggregate, secrets ChallengeSecrets) error {
+func validateEnrollmentSecrets(a domain.Aggregate, secrets ChallengeSecrets, links InvitationURLPolicy) error {
 	for _, c := range a.Challenges {
 		if c.EncryptedCode != "" {
 			code, err := secrets.Open(codeScope(c.ChallengeID, c.Purpose), c.EncryptedCode)
@@ -212,6 +238,13 @@ func validateEnrollmentSecrets(a domain.Aggregate, secrets ChallengeSecrets) err
 	}
 	for _, j := range a.MailJobs {
 		if j.EncryptedPayload == "" {
+			continue
+		}
+		if j.Purpose == "invitation_link" {
+			s := &Accounts{opts: AccountOptions{Challenges: secrets, LinkURLs: links}}
+			if _, err := s.openInvitationLink(a, j); err != nil {
+				return err
+			}
 			continue
 		}
 		i, err := challengeIndex(a, j.ChallengeID)
@@ -265,7 +298,7 @@ func (s *Accounts) claimMail(ctx context.Context) (MailDelivery, int, bool, erro
 		now := s.opts.Clock.Now()
 		selected := -1
 		for i, j := range a.MailJobs {
-			if j.State == "queued" || j.State == "unknown" {
+			if (j.State == "queued" || j.State == "unknown") && (j.NextAttemptAt == "" || !before(now, j.NextAttemptAt)) && (j.Purpose != "invitation_link" || j.State != "unknown" || j.Attempts < 3) {
 				if selected < 0 || j.AcceptedAt < a.MailJobs[selected].AcceptedAt {
 					selected = i
 				}
@@ -275,6 +308,13 @@ func (s *Accounts) claimMail(ctx context.Context) (MailDelivery, int, bool, erro
 			return MailDelivery{}, 0, false, nil
 		}
 		j := &a.MailJobs[selected]
+		if j.Purpose == "invitation_link" {
+			delivery, attempt, worked, err := s.claimInvitationLink(ctx, a, selected)
+			if errors.Is(err, ErrRevisionConflict) && !s.recovering {
+				continue
+			}
+			return delivery, attempt, worked, err
+		}
 		ci, err := challengeIndex(a, j.ChallengeID)
 		if err != nil {
 			return MailDelivery{}, 0, false, err
@@ -292,39 +332,6 @@ func (s *Accounts) claimMail(ctx context.Context) (MailDelivery, int, bool, erro
 				continue
 			} else {
 				return MailDelivery{}, 0, true, err
-			}
-		}
-		if j.NextAttemptAt != "" && before(now, j.NextAttemptAt) {
-			ready := -1
-			for i, other := range a.MailJobs {
-				if (other.State == "queued" || other.State == "unknown") && (other.NextAttemptAt == "" || !before(now, other.NextAttemptAt)) {
-					ready = i
-					break
-				}
-			}
-			if ready < 0 {
-				return MailDelivery{}, 0, false, nil
-			}
-			selected = ready
-			j = &a.MailJobs[selected]
-			ci, err = challengeIndex(a, j.ChallengeID)
-			if err != nil {
-				return MailDelivery{}, 0, false, err
-			}
-			c = a.Challenges[ci]
-			email, err = challengeEmail(a, c, now)
-			if err != nil || c.State != "pending" || !before(now, c.ExpiresAt) || j.Attempts >= 3 {
-				j.State = "suppressed"
-				if j.Attempts >= 3 && err == nil && c.State == "pending" && before(now, c.ExpiresAt) {
-					j.State = "failed"
-				}
-				j.EncryptedPayload = ""
-				j.NextAttemptAt = ""
-				if err := s.commit(ctx, a); errors.Is(err, ErrRevisionConflict) && !s.recovering {
-					continue
-				} else {
-					return MailDelivery{}, 0, true, err
-				}
 			}
 		}
 		plain, err := s.opts.Challenges.Open(payloadScope(j.JobID), j.EncryptedPayload)

@@ -13,6 +13,7 @@ import (
 	mail "github.com/JustIkra/umir-auth/internal/adapters/mail"
 	"github.com/JustIkra/umir-auth/internal/adapters/runtimehttp"
 	"github.com/JustIkra/umir-auth/internal/adapters/timezones"
+	"github.com/JustIkra/umir-auth/internal/application"
 )
 
 type clock struct{ location *time.Location }
@@ -20,24 +21,25 @@ type clock struct{ location *time.Location }
 func (c clock) Now() time.Time { return time.Now().In(c.location) }
 
 type config struct {
-	PrivateAddress   string                      `json:"privateAddress"`
-	StateFile        string                      `json:"stateFile"`
-	SecretsDir       string                      `json:"secretsDir"`
-	Initial          *InitialUser                `json:"initialUser"`
-	PasswordFile     string                      `json:"passwordFile"`
-	ServiceKeyFiles  map[string]string           `json:"serviceKeyFiles"`
-	PeerKeyFiles     map[string]string           `json:"peerKeyFiles"`
-	PeerURLs         map[string]string           `json:"peerURLs"`
-	ZoneDataFile     string                      `json:"zoneDataFile"`
-	ZoneDataVersion  string                      `json:"zoneDataVersion"`
-	IsolatedHTTP     bool                        `json:"isolatedHTTP"`
-	TLSCertFile      string                      `json:"tlsCertFile"`
-	TLSKeyFile       string                      `json:"tlsKeyFile"`
-	SMTP             mail.SMTPConfig             `json:"smtp"`
-	RegistrationMail mail.RegistrationMailConfig `json:"registrationMail"`
-	SMTPUsernameFile string                      `json:"smtpUsernameFile"`
-	SMTPPasswordFile string                      `json:"smtpPasswordFile"`
-	SMTPCAFile       string                      `json:"smtpCAFile"`
+	PrivateAddress   string                            `json:"privateAddress"`
+	StateFile        string                            `json:"stateFile"`
+	SecretsDir       string                            `json:"secretsDir"`
+	Initial          *InitialUser                      `json:"initialUser"`
+	PasswordFile     string                            `json:"passwordFile"`
+	ServiceKeyFiles  map[string]string                 `json:"serviceKeyFiles"`
+	PeerKeyFiles     map[string]string                 `json:"peerKeyFiles"`
+	PeerURLs         map[string]string                 `json:"peerURLs"`
+	ZoneDataFile     string                            `json:"zoneDataFile"`
+	ZoneDataVersion  string                            `json:"zoneDataVersion"`
+	IsolatedHTTP     bool                              `json:"isolatedHTTP"`
+	TLSCertFile      string                            `json:"tlsCertFile"`
+	TLSKeyFile       string                            `json:"tlsKeyFile"`
+	SMTP             mail.SMTPConfig                   `json:"smtp"`
+	RegistrationMail mail.RegistrationMailConfig       `json:"registrationMail"`
+	InvitationMail   application.InvitationMailOptions `json:"invitationMail"`
+	SMTPUsernameFile string                            `json:"smtpUsernameFile"`
+	SMTPPasswordFile string                            `json:"smtpPasswordFile"`
+	SMTPCAFile       string                            `json:"smtpCAFile"`
 }
 
 func Run(ctx context.Context, path string) (err error) {
@@ -80,6 +82,7 @@ func Run(ctx context.Context, path string) (err error) {
 		return e
 	}
 	o := Options{StateFile: cfg.StateFile, SecretsDir: cfg.SecretsDir, Initial: cfg.Initial, Password: string(password), Clock: clock{location: location}, TimeZones: zones, Runtimes: peers, ServiceKeys: keys}
+	o.InvitationMail = cfg.InvitationMail
 	runtime, e := Open(ctx, o)
 	if e != nil {
 		return e

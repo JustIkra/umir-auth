@@ -84,6 +84,6 @@ func (s *Accounts) saveLoginCommand(a *domain.Aggregate, in LoginInput, fp strin
 	if err != nil {
 		return ErrAuthUnavailable
 	}
-	a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{PreauthDigest: in.PreauthDigest, OperationID: "login", CommandID: in.CommandID, Fingerprint: fp, AggregateRevision: v.AggregateRevision, HTTPStatus: 200, ResponseSchema: "SessionIssued", EncryptedResponse: sealed, JobIDs: []domain.EntityID{}})
+	a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{ContractProfile: "C2", PreauthDigest: in.PreauthDigest, OperationID: "login", CommandID: in.CommandID, Fingerprint: fp, AggregateRevision: v.AggregateRevision, HTTPStatus: 200, ResponseSchema: "SessionIssued", EncryptedResponse: sealed, JobIDs: []domain.EntityID{}})
 	return nil
 }

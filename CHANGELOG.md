@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add UA1 Admin member/invitation snapshot reads and atomic invitation-link jobs.
+  Preserve OTP routes, legacy command replay and original invitation deadlines.
+- Upgrade validated Auth storage v1 to v2 with explicit command profiles, typed
+  mail purposes and retained identities. Reject malformed linkage and rollback.
+- Add trusted-origin configuration, shared resend cooldown and issue budgets,
+  stable SMTP identities and bounded unknown retry/restart handling.
+
 - Generate valid eight-hour nonpersistent session deadlines in the test-only
   legacy-v2 profile. Preserve migration guards and exact source deadline checks;
   the former four-hour fixture was rejected before import.

@@ -20,8 +20,9 @@ func VersionNumber(v Version) (int64, bool) {
 	n, err := strconv.ParseInt(string(v), 10, 64)
 	return n, err == nil && n > 0 && strconv.FormatInt(n, 10) == string(v)
 }
-func validID(id EntityID) bool  { return uuidPattern.MatchString(string(id)) }
-func validDigest(s string) bool { return digestPattern.MatchString(s) }
+func validID(id EntityID) bool       { return uuidPattern.MatchString(string(id)) }
+func ValidEntityID(id EntityID) bool { return validID(id) }
+func validDigest(s string) bool      { return digestPattern.MatchString(s) }
 func text(s string, min, max int) bool {
 	n := utf8.RuneCountInString(s)
 	return utf8.ValidString(s) && n >= min && n <= max && !strings.ContainsAny(s, "\x00\r\n")
@@ -118,7 +119,7 @@ func (v *validation) restaurant(id, org EntityID) bool {
 	return ok && r.OrgID == org
 }
 func Validate(a Aggregate) (ValidatedAggregate, error) {
-	if a.SchemaVersion != 1 || !version(a.AggregateRevision) || a.Users == nil || a.Organizations == nil || a.Restaurants == nil || a.Memberships == nil || a.Sessions == nil || a.Invitations == nil || a.Challenges == nil || a.MailJobs == nil || a.Idempotency == nil || a.LifecycleIntents == nil || a.Tombstones == nil {
+	if (a.SchemaVersion != 1 && a.SchemaVersion != 2) || !version(a.AggregateRevision) || a.Users == nil || a.Organizations == nil || a.Restaurants == nil || a.Memberships == nil || a.Sessions == nil || a.Invitations == nil || a.Challenges == nil || a.MailJobs == nil || a.Idempotency == nil || a.LifecycleIntents == nil || a.Tombstones == nil {
 		return ValidatedAggregate{}, ErrInvalidAggregate
 	}
 	v := validation{ids: map[EntityID]bool{}, users: map[EntityID]User{}, orgs: map[EntityID]Organization{}, restaurants: map[EntityID]Restaurant{}, invites: map[EntityID]Invitation{}, challenges: map[EntityID]Challenge{}, jobs: map[EntityID]MailJob{}}
@@ -284,16 +285,33 @@ func (v *validation) challengeRecords(a Aggregate) bool {
 	return true
 }
 func (v *validation) mail(a Aggregate) bool {
+	order := int64(0)
 	for _, j := range a.MailJobs {
 		c, ok := v.challenges[j.ChallengeID]
+		link := a.SchemaVersion == 2 && j.Purpose == "invitation_link"
+		if a.SchemaVersion == 1 && (j.Purpose != "" || j.EnqueueOrder != "") {
+			return false
+		}
+		if a.SchemaVersion == 2 {
+			n, valid := VersionNumber(j.EnqueueOrder)
+			if !valid || n <= order || !oneOf(j.Purpose, "otp", "invitation_link") {
+				return false
+			}
+			order = n
+		}
 		_, timeok := instant(j.AcceptedAt)
-		if !v.identity(j.JobID) || !ok || !timeok || !oneOf(j.State, "queued", "sending", "delivered", "unknown", "failed", "suppressed") || (j.EncryptedPayload != "" && !text(j.EncryptedPayload, 1, 65536)) || (oneOf(j.State, "queued", "sending", "unknown") && j.EncryptedPayload == "") || j.Attempts < 0 || j.Attempts > 3 {
+		if !v.identity(j.JobID) || !link && !ok || !timeok || !oneOf(j.State, "queued", "sending", "delivered", "unknown", "failed", "suppressed") || (j.EncryptedPayload != "" && !text(j.EncryptedPayload, 1, 65536)) || (oneOf(j.State, "queued", "sending", "unknown") && j.EncryptedPayload == "") || j.Attempts < 0 || j.Attempts > 3 {
 			return false
 		}
 		if j.LastAttemptAt != "" && !ordered(j.AcceptedAt, j.LastAttemptAt) || j.NextAttemptAt != "" && !ordered(j.AcceptedAt, j.NextAttemptAt) {
 			return false
 		}
-		if c.InvitationID != "" {
+		if link {
+			i, exists := v.invites[j.InvitationID]
+			if !exists || j.ChallengeID != "" || j.OrgID != i.OrgID {
+				return false
+			}
+		} else if c.InvitationID != "" {
 			i := v.invites[c.InvitationID]
 			if j.InvitationID != i.InvitationID || j.OrgID != i.OrgID {
 				return false
@@ -313,8 +331,12 @@ func (v *validation) commands(a Aggregate) bool {
 		command            string
 	}
 	keys := map[key]bool{}
+	linkBindings := map[EntityID]int{}
 	revision, _ := VersionNumber(a.AggregateRevision)
 	for _, r := range a.Idempotency {
+		if a.SchemaVersion == 1 && r.ContractProfile != "" || a.SchemaVersion == 2 && !oneOf(r.ContractProfile, "C2", "UA1") {
+			return false
+		}
 		_, actor := v.users[r.ActorID]
 		if (r.ActorID != "" && !actor) || (r.ActorID == "" && !validDigest(r.PreauthDigest)) || (r.ActorID != "" && r.PreauthDigest != "") || !text(r.OperationID, 1, 128) || !commandText(r.CommandID) || !validDigest(r.Fingerprint) || !version(r.AggregateRevision) || r.HTTPStatus < 200 || r.HTTPStatus > 599 || !text(r.ResponseSchema, 1, 128) || !text(r.EncryptedResponse, 1, 1048576) || r.JobIDs == nil || !unique(r.JobIDs) {
 			return false
@@ -332,7 +354,19 @@ func (v *validation) commands(a Aggregate) bool {
 			return false
 		}
 		for _, id := range r.JobIDs {
-			if _, ok := v.jobs[id]; !ok {
+			j, ok := v.jobs[id]
+			if !ok {
+				return false
+			}
+			if j.Purpose == "invitation_link" {
+				if r.ContractProfile != "UA1" || !oneOf(r.OperationID, "createInvitation", "resendInvitationLink") || r.OrgID != j.OrgID || r.ActorID == "" || r.PreauthDigest != "" || len(r.JobIDs) != 1 {
+					return false
+				}
+				linkBindings[id]++
+			}
+		}
+		if r.ContractProfile == "UA1" {
+			if len(r.JobIDs) != 1 || v.jobs[r.JobIDs[0]].Purpose != "invitation_link" || r.OperationID == "createInvitation" && (r.HTTPStatus != 201 || r.ResponseSchema != "Invitation") || r.OperationID == "resendInvitationLink" && (r.HTTPStatus != 200 || r.ResponseSchema != "DurableResult") || !oneOf(r.OperationID, "createInvitation", "resendInvitationLink") {
 				return false
 			}
 		}
@@ -349,6 +383,11 @@ func (v *validation) commands(a Aggregate) bool {
 			return false
 		}
 		keys[k] = true
+	}
+	for id, j := range v.jobs {
+		if j.Purpose == "invitation_link" && linkBindings[id] != 1 {
+			return false
+		}
 	}
 	return true
 }
