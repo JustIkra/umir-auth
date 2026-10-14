@@ -205,7 +205,7 @@ func (s *Accounts) lifecycleCommand(ctx context.Context, token, csrf, operation 
 			return LifecycleResult{}, err
 		}
 		a.LifecycleIntents = append(a.LifecycleIntents, result)
-		a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{ActorID: u.UserID, OperationID: operation, OrgID: org, RestaurantID: restaurant, CommandID: command, Fingerprint: fp, AggregateRevision: revision, HTTPStatus: status, ResponseSchema: "LifecycleResult", EncryptedResponse: sealed, JobIDs: []domain.EntityID{}, RecordedAt: formatInstant(s.opts.Clock.Now())})
+		a.Idempotency = append(a.Idempotency, domain.IdempotencyRecord{ContractProfile: "C2", ActorID: u.UserID, OperationID: operation, OrgID: org, RestaurantID: restaurant, CommandID: command, Fingerprint: fp, AggregateRevision: revision, HTTPStatus: status, ResponseSchema: "LifecycleResult", EncryptedResponse: sealed, JobIDs: []domain.EntityID{}, RecordedAt: formatInstant(s.opts.Clock.Now())})
 		if err := s.commit(ctx, a); err != nil {
 			if errors.Is(err, ErrRevisionConflict) {
 				continue

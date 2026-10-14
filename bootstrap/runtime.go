@@ -13,9 +13,11 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/JustIkra/umir-auth/internal/adapters/challengesecrets"
 	"github.com/JustIkra/umir-auth/internal/adapters/httpapi"
+	"github.com/JustIkra/umir-auth/internal/adapters/invitationurl"
 	"github.com/JustIkra/umir-auth/internal/adapters/jsonstore"
 	"github.com/JustIkra/umir-auth/internal/adapters/jwt"
 	"github.com/JustIkra/umir-auth/internal/adapters/password"
@@ -35,6 +37,7 @@ type InitialUser struct {
 	Email             string          `json:"email,omitempty"`
 }
 type Options struct {
+	InvitationMail                  application.InvitationMailOptions
 	StateFile, SecretsDir, Password string
 	Initial                         *InitialUser
 	Clock                           application.Clock
@@ -179,6 +182,10 @@ func open(ctx context.Context, o Options, imported *domain.ValidatedAggregate) (
 		return nil, ErrNotReady
 	}
 	accountOptions := application.AccountOptions{Repository: store, Passwords: hasher, Clock: o.Clock, IDs: entropy{}, Tokens: entropy{}, Results: results, Challenges: challenges, Issuer: signer, TimeZones: o.TimeZones, Runtimes: o.Runtimes}
+	accountOptions.InvitationMail = o.InvitationMail
+	accountOptions.LinkURLs = invitationurl.Policy{}
+	accountOptions.PageClock = physicalPageClock{}
+	accountOptions.PageAfter = func(d time.Duration, f func()) application.PageExpiryTimer { return time.AfterFunc(d, f) }
 	accounts, err := application.NewAccounts(ctx, accountOptions)
 	if err != nil {
 		return nil, errors.Join(ErrNotReady, err)
@@ -263,9 +270,16 @@ func loadSecrets(o Options, initialize bool) (ownerSecrets, error) {
 	return s, nil
 }
 func (r *Runtime) Close() error {
-	r.once.Do(func() { r.closeErr = r.Store.Close() })
+	r.once.Do(func() {
+		r.Accounts.CloseReadPages()
+		r.closeErr = r.Store.Close()
+	})
 	return r.closeErr
 }
+
+type physicalPageClock struct{}
+
+func (physicalPageClock) Now() time.Time { return time.Now() }
 
 func (r *Runtime) failWorker(err error) {
 	r.healthMu.Lock()

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/JustIkra/umir-auth/internal/adapters/challengesecrets"
+	"github.com/JustIkra/umir-auth/internal/adapters/invitationurl"
 	"github.com/JustIkra/umir-auth/internal/adapters/jsonstore"
 	"github.com/JustIkra/umir-auth/internal/application"
 	"github.com/JustIkra/umir-auth/internal/domain"
@@ -31,15 +32,15 @@ func enrollmentSetup(t *testing.T) *enrollmentFixture {
 		t.Fatal(err)
 	}
 	f.opts.Challenges = crypto
+	f.opts.InvitationMail = application.InvitationMailOptions{FrontendOrigin: "https://app.umir.invalid"}
+	f.opts.LinkURLs = invitationurl.Policy{}
 	f.accounts, err = application.NewAccounts(ctx, f.opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e := &enrollmentFixture{membershipFixture: f, crypto: crypto, actor: application.ChallengeActor{PreauthDigest: application.TokenDigest("synthetic-invited-browser")}}
-	e.invitation, err = e.accounts.CreateInvitation(ctx, f.owner.Token, f.owner.CSRFToken, f.org, application.CreateInvitationInput{CommandID: "invite-1", Email: "Invited@UMIR.INVALID", Assignments: []domain.InviteAssignment{{RestaurantID: f.r1, Roles: []string{"Warehouse", "Waiter"}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	e.invitation = legacyInvitationFixture(t, f)
+	e.membershipFixture = f
 	return e
 }
 func (e *enrollmentFixture) begin(t *testing.T) application.ChallengeView {

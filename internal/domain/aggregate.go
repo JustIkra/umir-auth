@@ -112,8 +112,10 @@ type Challenge struct {
 	WrongAttempts     int      `json:"wrongAttempts"`
 }
 type MailJob struct {
+	Purpose          string   `json:"purpose,omitempty"`
+	EnqueueOrder     Version  `json:"enqueueOrder,omitempty"`
 	JobID            EntityID `json:"jobID"`
-	ChallengeID      EntityID `json:"challengeID"`
+	ChallengeID      EntityID `json:"challengeID,omitempty"`
 	OrgID            EntityID `json:"orgID,omitempty"`
 	InvitationID     EntityID `json:"invitationID,omitempty"`
 	State            string   `json:"state"`
@@ -124,6 +126,7 @@ type MailJob struct {
 	NextAttemptAt    Instant  `json:"nextAttemptAt,omitempty"`
 }
 type IdempotencyRecord struct {
+	ContractProfile   string     `json:"contractProfile,omitempty"`
 	ActorID           EntityID   `json:"actorID,omitempty"`
 	PreauthDigest     string     `json:"preauthDigest,omitempty"`
 	OperationID       string     `json:"operationID"`

@@ -188,10 +188,10 @@ func (s *SMTP) send(ctx context.Context, to string, message []byte) application.
 	return application.DeliveryResult{Success: true, Code: "smtp_sent"}
 }
 func (s *SMTP) Deliver(ctx context.Context, d application.MailDelivery, message []byte) application.DeliveryResult {
-	if !validMailTarget(d.Mail.Email) {
+	if !validMailTarget(d.Recipient()) {
 		return permanentSMTP("smtp_invalid_recipient")
 	}
-	return s.send(ctx, d.Mail.Email, message)
+	return s.send(ctx, d.Recipient(), message)
 }
 
 func selectSMTPAuth(client *smtp.Client, host, username, password string) (smtp.Auth, bool) {

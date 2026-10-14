@@ -23,26 +23,31 @@ type PasswordHasher interface {
 	Check(string) error
 }
 type AccountOptions struct {
-	Repository AggregateRepository
-	Passwords  PasswordHasher
-	Clock      Clock
-	IDs        IDGenerator
-	Tokens     TokenSource
-	Results    ResultSecrets
-	Challenges ChallengeSecrets
-	Issuer     UserTokenIssuer
-	TimeZones  TimeZoneCatalog
-	Runtimes   RuntimePeers
+	LinkURLs       InvitationURLPolicy
+	InvitationMail InvitationMailOptions
+	Repository     AggregateRepository
+	Passwords      PasswordHasher
+	Clock          Clock
+	PageClock      Clock
+	PageAfter      func(time.Duration, func()) PageExpiryTimer
+	IDs            IDGenerator
+	Tokens         TokenSource
+	Results        ResultSecrets
+	Challenges     ChallengeSecrets
+	Issuer         UserTokenIssuer
+	TimeZones      TimeZoneCatalog
+	Runtimes       RuntimePeers
 }
 type Accounts struct {
-	opts             AccountOptions
-	mu               sync.Mutex
-	reconciling      chan struct{}
-	recovering       bool
-	gate             *verificationGate
-	changing         chan struct{}
-	loginFailures    failureThrottle
-	passwordFailures map[domain.EntityID]*failureThrottle
+	opts              AccountOptions
+	mu                sync.Mutex
+	reconciling       chan struct{}
+	recovering        bool
+	gate              *verificationGate
+	changing          chan struct{}
+	loginFailures     failureThrottle
+	passwordFailures  map[domain.EntityID]*failureThrottle
+	organizationPages organizationPages
 }
 
 var (
@@ -102,11 +107,36 @@ func NewAccounts(ctx context.Context, o AccountOptions) (*Accounts, error) {
 		}
 	}
 	if o.Challenges != nil {
-		if err := validateEnrollmentSecrets(a.Snapshot(), o.Challenges); err != nil {
+		if err := validateEnrollmentSecrets(a.Snapshot(), o.Challenges, o.LinkURLs); err != nil {
 			return nil, ErrAuthUnavailable
 		}
 	}
+	if a.Snapshot().SchemaVersion == 1 {
+		upgraded, err := domain.UpgradeV1(a.Snapshot())
+		if err != nil {
+			return nil, errors.Join(ErrAuthUnavailable, err)
+		}
+		upgraded.AggregateRevision, err = nextVersion(a.Revision())
+		if err != nil {
+			return nil, err
+		}
+		next, err := domain.Validate(upgraded)
+		if err != nil {
+			return nil, errors.Join(ErrAuthUnavailable, err)
+		}
+		result, err := o.Repository.Commit(ctx, a.Revision(), next)
+		if result.Outcome != Committed || err != nil || result.AggregateRevision != next.Revision() {
+			if result.Outcome == NotCommitted && !errors.Is(err, ErrRecoveryRequired) {
+				return nil, errors.Join(ErrStorageUnavailable, err)
+			}
+			return nil, errors.Join(ErrUpdateOutcomeUnknown, err)
+		}
+	}
 	s := &Accounts{opts: o, gate: newVerificationGate(2, 8), changing: make(chan struct{}, 1), reconciling: make(chan struct{}, 1), passwordFailures: map[domain.EntityID]*failureThrottle{}}
+	if s.opts.PageClock == nil {
+		s.opts.PageClock = o.Clock
+	}
+	s.organizationPages = organizationPages{captures: map[*organizationCapture]bool{}, cursors: map[string]organizationCursor{}, orgBytes: map[domain.EntityID]int{}, orgCounts: map[domain.EntityID]int{}}
 	if o.Challenges != nil {
 		if err := s.RecoverMail(ctx); err != nil {
 			return nil, err

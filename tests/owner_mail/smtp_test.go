@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/JustIkra/umir-auth/internal/adapters/challengesecrets"
+	"github.com/JustIkra/umir-auth/internal/adapters/invitationurl"
 	"github.com/JustIkra/umir-auth/internal/adapters/jsonstore"
 	mailadapter "github.com/JustIkra/umir-auth/internal/adapters/mail"
 	"github.com/JustIkra/umir-auth/internal/adapters/password"
@@ -83,7 +84,7 @@ func TestA4RealSMTPUsesDurableOwnerCorrelation(t *testing.T) {
 	}
 	clock := &ownerClock{at: time.Date(2026, 10, 13, 9, 0, 0, 0, time.FixedZone("Europe/Moscow", 3*3600))}
 	ids := ownerIDs{crypto}
-	accounts, err := application.NewAccounts(ctx, application.AccountOptions{Repository: store, Passwords: hasher, Clock: clock, IDs: ids, Tokens: ids, Results: results, Challenges: crypto})
+	accounts, err := application.NewAccounts(ctx, application.AccountOptions{Repository: store, Passwords: hasher, Clock: clock, IDs: ids, Tokens: ids, Results: results, Challenges: crypto, InvitationMail: application.InvitationMailOptions{FrontendOrigin: "https://app.umir.invalid"}, LinkURLs: invitationurl.Policy{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,6 +119,14 @@ func TestA4RealSMTPUsesDurableOwnerCorrelation(t *testing.T) {
 	if worked, err := accounts.ProcessMail(ctx, sender); err != nil || !worked {
 		t.Fatal("real owner worker/SMTP failed")
 	}
+	linkMessage := <-server.Messages()
+	linkParsed, err := mail.ReadMessage(strings.NewReader(linkMessage))
+	if err != nil || linkParsed.Header.Get("X-Umir-Fixture-Invitation-ID") != string(invite.InvitationID) || linkParsed.Header.Get("X-Umir-Fixture-Challenge-ID") != "" {
+		t.Fatal("link SMTP delivery lacked its real invitation correlation")
+	}
+	if worked, err := accounts.ProcessMail(ctx, sender); err != nil || !worked {
+		t.Fatal("real OTP worker/SMTP failed after link delivery")
+	}
 	message := <-server.Messages()
 	parsed, err := mail.ReadMessage(strings.NewReader(message))
 	if err != nil {
@@ -128,7 +137,7 @@ func TestA4RealSMTPUsesDurableOwnerCorrelation(t *testing.T) {
 		t.Fatal(err)
 	}
 	saved := snapshot.Snapshot()
-	job := saved.MailJobs[0]
+	job := saved.MailJobs[1]
 	if job.State != "delivered" || job.Attempts != 1 || parsed.Header.Get("X-Umir-Fixture-Job-ID") != string(job.JobID) || parsed.Header.Get("X-Umir-Fixture-Challenge-ID") != string(challenge.ChallengeID) {
 		t.Fatal("captured MIME did not match real durable job/challenge")
 	}

@@ -2,3 +2,5 @@
 auth.json
 auth.json.lock
 .auth.tmp-*
+/tests/email/*-preview*.html
+/tests/email/*-preview*.txt

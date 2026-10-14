@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/JustIkra/umir-auth/internal/domain"
@@ -133,7 +134,7 @@ func proofScope(id domain.EntityID, purpose string) string {
 	return "proof:" + string(id) + ":" + purpose
 }
 func (s *Accounts) issueLimit(a domain.Aggregate, email string, now time.Time) error {
-	global, target := 0, 0
+	var global, target []time.Time
 	for _, j := range a.MailJobs {
 		at, err := time.Parse(time.RFC3339Nano, string(j.AcceptedAt))
 		if err != nil {
@@ -142,34 +143,50 @@ func (s *Accounts) issueLimit(a domain.Aggregate, email string, now time.Time) e
 		if now.Sub(at) >= 10*time.Minute {
 			continue
 		}
-		global++
-		ci, err := challengeIndex(a, j.ChallengeID)
-		if err != nil {
-			return ErrAuthUnavailable
-		}
-		c := a.Challenges[ci]
+		global = append(global, at)
 		other := ""
-		if c.InvitationID != "" {
-			ii, err := invitationIndex(a, c.InvitationID)
+		if j.Purpose == "invitation_link" {
+			ii, err := invitationIndex(a, j.InvitationID)
 			if err != nil {
 				return ErrAuthUnavailable
 			}
 			other = a.Invitations[ii].ComparisonEmail
 		} else {
-			u, ok := findUser(a, c.UserID)
-			if !ok {
+			ci, err := challengeIndex(a, j.ChallengeID)
+			if err != nil {
 				return ErrAuthUnavailable
 			}
-			other = domain.ComparisonEmail(u.Email)
+			c := a.Challenges[ci]
+			if c.InvitationID != "" {
+				ii, err := invitationIndex(a, c.InvitationID)
+				if err != nil {
+					return ErrAuthUnavailable
+				}
+				other = a.Invitations[ii].ComparisonEmail
+			} else {
+				u, ok := findUser(a, c.UserID)
+				if !ok {
+					return ErrAuthUnavailable
+				}
+				other = domain.ComparisonEmail(u.Email)
+			}
 		}
 		if other == email {
-			target++
+			target = append(target, at)
 		}
 	}
-	if global >= 60 || target >= 3 {
-		return ErrChallengeRateLimited
+	if delay := max(rollingIssueDelay(global, 60, 10*time.Minute, now), rollingIssueDelay(target, 3, 10*time.Minute, now)); delay > 0 {
+		return &InvitationRateLimitError{RetryAfter: delay}
 	}
 	return nil
+}
+
+func rollingIssueDelay(times []time.Time, limit int, window time.Duration, now time.Time) time.Duration {
+	if len(times) < limit {
+		return 0
+	}
+	slices.SortFunc(times, func(a, b time.Time) int { return a.Compare(b) })
+	return times[len(times)-limit].Add(window).Sub(now)
 }
 func (s *Accounts) newChallenge(a *domain.Aggregate, who enrollmentActor, purpose, email string, invite domain.EntityID, user domain.User) (enrollmentChange[ChallengeView], error) {
 	if s.opts.Challenges == nil {
@@ -261,6 +278,19 @@ func (s *Accounts) ResendChallenge(ctx context.Context, actor ChallengeActor, id
 			if c.IssueCount >= 4 || before(now, c.ResendAvailableAt) {
 				return enrollmentChange[ChallengeView]{}, ErrChallengeRateLimited
 			}
+			if c.InvitationID != "" {
+				ii, err := invitationIndex(*a, c.InvitationID)
+				if err != nil {
+					return enrollmentChange[ChallengeView]{}, err
+				}
+				if before(now, a.Invitations[ii].ResendAvailableAt) {
+					at, err := time.Parse(time.RFC3339Nano, string(a.Invitations[ii].ResendAvailableAt))
+					if err != nil {
+						return enrollmentChange[ChallengeView]{}, ErrAuthUnavailable
+					}
+					return enrollmentChange[ChallengeView]{}, &InvitationRateLimitError{RetryAfter: at.Sub(now)}
+				}
+			}
 			email, err := challengeEmail(*a, *c, now)
 			if err != nil {
 				return enrollmentChange[ChallengeView]{}, err
@@ -285,6 +315,21 @@ func (s *Accounts) ResendChallenge(ctx context.Context, actor ChallengeActor, id
 				next = expires
 			}
 			c.ResendAvailableAt = formatInstant(next)
+			if c.InvitationID != "" {
+				ii, err := invitationIndex(*a, c.InvitationID)
+				if err != nil {
+					return enrollmentChange[ChallengeView]{}, err
+				}
+				invite := &a.Invitations[ii]
+				invite.ResendAvailableAt = formatInstant(now.Add(time.Minute))
+				if !before(now.Add(time.Minute), invite.ExpiresAt) {
+					invite.ResendAvailableAt = invite.ExpiresAt
+				}
+				invite.Version, err = nextVersion(invite.Version)
+				if err != nil {
+					return enrollmentChange[ChallengeView]{}, err
+				}
+			}
 			v := *c
 			job, err := s.enqueueChallenge(a, v, email, code)
 			if err != nil {
@@ -461,6 +506,7 @@ func (s *Accounts) CompleteInvitedUser(ctx context.Context, actor ChallengeActor
 				return enrollmentChange[SessionView]{}, err
 			}
 			a.Invitations[ii].State = "accepted"
+			suppressInvitationJobs(a, v.InvitationID)
 			a.Invitations[ii].Version, err = nextVersion(v.Version)
 			if err != nil {
 				return enrollmentChange[SessionView]{}, err
@@ -516,6 +562,7 @@ func (s *Accounts) AcceptInvitation(ctx context.Context, actor ChallengeActor, i
 				}
 			}
 			a.Invitations[ii].State = "accepted"
+			suppressInvitationJobs(a, v.InvitationID)
 			a.Invitations[ii].Version, err = nextVersion(v.Version)
 			if err != nil {
 				return enrollmentChange[domain.Membership]{}, err

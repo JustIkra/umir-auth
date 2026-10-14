@@ -58,6 +58,7 @@ func (h *handler) scopeRoutes() {
 	})
 }
 func (h *handler) readRoutes() {
+	h.organizationReadRoutes()
 	h.mux.HandleFunc("GET /internal/auth/v1/public/access", func(w http.ResponseWriter, r *http.Request) {
 		v, e := h.o.Accounts.Access(r.Context(), session(r))
 		respond(w, 200, v, e)

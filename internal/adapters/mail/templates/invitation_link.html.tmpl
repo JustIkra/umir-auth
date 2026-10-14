@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>{{.Subject}}</title>
+</head>
+<body style="margin:0;padding:0;background:#f5f7f9;color:#172b4d;font-family:'IBM Plex Sans',Arial,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;">{{.Preheader}}</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f5f7f9;">
+    <tr><td align="center" style="padding:2.5rem 5.333333%;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;max-width:37.5rem;border-collapse:collapse;">
+        <tr><td style="padding:0 0 1.25rem;font-size:1rem;line-height:1.5;font-weight:600;"><img src="cid:{{.LogoContentID}}" width="28" height="28" alt="" style="width:1.75rem;height:1.75rem;vertical-align:middle;margin-right:.5rem;">Ровный ход</td></tr>
+        <tr><td style="padding:6%;background:#ffffff;border:1px solid #d3dbe3;border-radius:.75rem;">
+          <h1 style="margin:0 0 1rem;font-size:1.5rem;line-height:1.333333;font-weight:600;">Вас пригласили в «Ровный ход»</h1>
+          <p style="margin:0 0 1.5rem;font-size:1rem;line-height:1.5;">Откройте приглашение и подтвердите вашу электронную почту на странице приглашения.</p>
+          <p style="margin:0 0 1.5rem;"><a href="{{.URL}}" style="display:inline-block;padding:.875rem 1.25rem;border-radius:.5rem;background:#006b63;color:#ffffff;font-size:1rem;line-height:1.5;font-weight:600;text-decoration:none;">Открыть приглашение</a></p>
+          <p style="margin:0 0 1rem;font-size:.875rem;line-height:1.428571;color:#526579;">Срок действия приглашения: {{.ExpiresAt}} МСК.</p>
+          <p style="margin:0;font-size:.875rem;line-height:1.428571;color:#526579;overflow-wrap:anywhere;">Если кнопка не открывается, используйте ссылку:<br><a href="{{.URL}}" style="color:#006b63;text-decoration:underline;word-break:break-all;">{{.URL}}</a></p>
+          <p style="margin:1.5rem 0 0;padding-top:1rem;border-top:1px solid #d3dbe3;font-size:.875rem;line-height:1.428571;color:#526579;">Открытие ссылки не предоставляет доступ без подтверждения почты. Если письмо пришло по ошибке, проигнорируйте его.</p>
+        </td></tr>
+        <tr><td style="padding:1.25rem 0 0;font-size:.875rem;line-height:1.428571;color:#526579;">Письмо отправлено автоматически. {{.OperatorName}} · {{.OperatorAddress}}</td></tr>
+        {{if .PrivacyURL}}<tr><td style="padding:.375rem 0 0;font-size:.875rem;"><a href="{{.PrivacyURL}}" style="color:#006b63;">Политика конфиденциальности</a></td></tr>{{end}}
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
