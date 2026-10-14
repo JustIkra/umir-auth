@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Generate valid eight-hour nonpersistent session deadlines in the test-only
+  legacy-v2 profile. Preserve migration guards and exact source deadline checks;
+  the former four-hour fixture was rejected before import.
+
 - Preserve password cooldown sessionRevoked and consistent Retry-After/delay
   fields at the private HTTP boundary, including wrapped application errors.
 
