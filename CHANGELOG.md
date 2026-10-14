@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add a separate test-only typed UA1 storage/mail control library with bounded
+  physical lifetimes, cancellation and identity-preserving observations. Exercise
+  real committed/unknown results, durable claim barriers and owned-process crash
+  recovery. Keep wire, server worker and runner integration explicitly pending.
 - Add a separate test-only UA1 job discovery endpoint for actual invitation-link
   and OTP identities, durable allocation, deadlines and synthetic Message-ID.
   Bind the reviewed supplement and current owner identity; reject mixed kinds,

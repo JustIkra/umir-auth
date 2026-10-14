@@ -1,0 +1,6 @@
+{
+  "supplement": "umir-ua1-mail-controls/0.1.0-unpublished",
+  "scope": "test-only typed library; no wire or server integration",
+  "contractSHA256": "fa254d5d922aa35c566c8699f4c5b5bf5e1939d66c56708150b94d8499662c20",
+  "discoveryBindingSHA256": "c468cb825a3b9bfe01577485f47267f4765c95286ac08de367002e3e25f3df45"
+}

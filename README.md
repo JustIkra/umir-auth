@@ -254,5 +254,26 @@ requires a fresh request ID and current owner identity.
 This endpoint reads the live writer's immutable aggregate. It does not run mail
 or mutate authority. A complete empty selection proves only that selected
 population. It does not prove zero mutation, enqueue or delivery. The existing
-operational RPC/schema and capabilities remain unchanged. Receiver integration,
-controlled faults/barriers and the complete UA1 qualification remain pending.
+operational RPC/schema and capabilities remain unchanged. Receiver integration
+and the complete UA1 qualification remain pending.
+
+The separate test library `umir-ua1-mail-controls/0.1.0-unpublished` supplies
+typed one-shot storage controls for actual createInvitation/resendInvitationLink
+commits, a gate before a routed ProcessMail invocation, and gates after durable
+link claim and after actual sender return. Its binding is
+`a89c877bc27aed78ac5c7ebee91a77c5a0680b8fbfb79fe7cc660e2f381d5738`.
+Controls retain 64 records without eviction and use physical 100..30000 ms arm
+lifetimes. The earlier control or invocation deadline cancels held work. The
+routed invocation lasts at most ten seconds; actual sender IO lasts at most five.
+Arm/hit/release/effect facts preserve their original identities and ordered
+sequences. Command controls bind actual actor/org/idempotency identity and exact
+request-body digest and the candidate's normalized fingerprint through the real
+Auth ResultSecrets Digest port. They do not assign a business or delivery outcome.
+
+Only owner tests call this library at present. It has no HTTP/CLI endpoint and
+is not connected to Runtime.Serve. Do not start a competing ProcessMail caller
+beside the existing worker. Live integration requires a closed wire adapter,
+single-worker routing, and a separately qualified barrier inside SMTP IO.
+The owned-child process test stops real Auth after a stored sending claim and
+checks ordinary bootstrap recovery and the retained retry deadline. These source
+checks do not qualify a complete UA1 scenario, profile or final assembly.
