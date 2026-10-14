@@ -228,3 +228,9 @@ SMTP uses the registration brand assets, a separate invitation template and a st
 Startup accepts a validated v1 aggregate and commits its explicit v2 upgrade before admission. Retain the existing result, challenge and session keys. The upgrade preserves identities, original deadlines, ciphertext and command results. Existing jobs become otp jobs with recorded enqueue order; existing command records retain the C2 profile. Fresh link commands use UA1 and require exactly one owned link job. Legacy zero-job create replay never backfills mail. Unknown formats, malformed linkage and format rollback fail closed. Stop the writer before replacing a binary; never restore an older authority over later accepted commands or revocations.
 
 UA1 source tests and local qualification are separate from the historical C2 all67, owner profile, F3/F4 and J1/E/J2 evidence. Run make check, make quality-test, go mod verify and a clean go mod tidy check on the final source.
+
+The test-only fixture command serve-ui-ua1 explicitly uses its validated test-owned
+public origin for invitation links and enables loopback HTTP. Ordinary serve and
+profile selectors keep their previous configuration. Typed link-job fixture
+discovery and controlled UA1 mail/fault qualification still require a separately
+labelled supplement; no challenge edge is fabricated.

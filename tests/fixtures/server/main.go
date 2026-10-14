@@ -31,6 +31,8 @@ func main() {
 	switch {
 	case len(os.Args) == 2 && os.Args[1] == "serve":
 		e = serve("")
+	case len(os.Args) == 2 && os.Args[1] == "serve-ui-ua1":
+		e = serve("ui-ua1")
 	case len(os.Args) == 4 && os.Args[1] == "serve-profile" && os.Args[2] == "--profile" && protocol.AuthProfile(os.Args[3]):
 		e = serve(os.Args[3])
 	case len(os.Args) == 2 && os.Args[1] == "probe-second-writer":
@@ -52,6 +54,10 @@ func main() {
 	}
 }
 func serve(selector string) (result error) {
+	uiProfile := selector == "ui-ua1"
+	if uiProfile {
+		selector = ""
+	}
 	cfg, digest, e := protocol.LoadConfig(protocol.ConfigPath)
 	if e != nil {
 		return e
@@ -161,6 +167,9 @@ func serve(selector string) (result error) {
 	}()
 	openContext, openCancel := context.WithTimeout(ctx, 10*time.Second)
 	options := bootstrap.Options{StateFile: cfg.StateFile, SecretsDir: filepath.Join(filepath.Dir(cfg.StateFile), "secrets"), Initial: &initial.User, Password: string(password), Clock: clock, TimeZones: zones, Runtimes: peers}
+	if uiProfile {
+		options.InvitationMail = application.InvitationMailOptions{FrontendOrigin: cfg.Origin, AllowLoopbackHTTP: true}
+	}
 	var runtime *bootstrap.Runtime
 	if selector != "" {
 		runtime, e = owner.Admit(openContext, selector, options)
