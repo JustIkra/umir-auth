@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -238,13 +239,35 @@ func failure(w http.ResponseWriter, e error) {
 			status, code, outcome = 400, "InvalidArgument", "not_committed"
 		}
 	}
-	write(w, status, struct {
-		Code      string `json:"code"`
-		Outcome   string `json:"outcome"`
-		Message   string `json:"message"`
-		Retryable bool   `json:"retryable"`
-	}{code, outcome, "Request could not be completed", false})
+	result := struct {
+		Code           string        `json:"code"`
+		Outcome        string        `json:"outcome"`
+		Message        string        `json:"message"`
+		Retryable      bool          `json:"retryable"`
+		SessionRevoked *bool         `json:"sessionRevoked,omitempty"`
+		Details        *retryDetails `json:"details,omitempty"`
+	}{Code: code, Outcome: outcome, Message: "Request could not be completed"}
+	var passwordLimit *application.PasswordChangeLimitError
+	var loginLimit *application.RateLimitError
+	var delay time.Duration
+	if errors.As(e, &passwordLimit) {
+		result.SessionRevoked = &passwordLimit.SessionRevoked
+		delay = passwordLimit.RetryAfter
+	} else if errors.As(e, &loginLimit) {
+		delay = loginLimit.RetryAfter
+	}
+	if delay > 0 {
+		seconds := int((delay-1)/time.Second) + 1
+		result.Details = &retryDetails{seconds}
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	}
+	write(w, status, result)
 }
+
+type retryDetails struct {
+	RetryAfterSeconds int `json:"retryAfterSeconds"`
+}
+
 func respond[T any](w http.ResponseWriter, status int, v T, e error) {
 	if e != nil {
 		failure(w, e)

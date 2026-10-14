@@ -136,7 +136,8 @@ func prepareStorage(ctx context.Context, p Profile, c *protocol.Clock, dir, proj
 				}
 				digest := application.TokenDigest(hex.EncodeToString(raw))
 				clear(raw)
-				created, last, expires := c.Now().Add(-10*time.Minute), c.Now().Add(-5*time.Minute), c.Now().Add(4*time.Hour)
+				created, last := c.Now().Add(-10*time.Minute), c.Now().Add(-5*time.Minute)
+				expires := created.Add(8 * time.Hour)
 				if remember {
 					created = c.Now().Add(-time.Hour)
 					last = c.Now().Add(-time.Minute)

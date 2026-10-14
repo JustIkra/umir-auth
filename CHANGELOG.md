@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Generate valid eight-hour nonpersistent session deadlines in the test-only
+  legacy-v2 profile. Preserve migration guards and exact source deadline checks;
+  the former four-hour fixture was rejected before import.
+
+- Preserve password cooldown sessionRevoked and consistent Retry-After/delay
+  fields at the private HTTP boundary, including wrapped application errors.
+
 - Reject partial bootstrap authority before reseeding; validate private secret creation paths and required original-profile metadata on every start.
 - Separate mail transport deadlines from durable outcome recording; retain healthy retry/readiness and stable jobs through timeout and restart.
 - Bind test-only faults to all frozen command-bearing Auth routes and reject unsupported selectors before arming.
