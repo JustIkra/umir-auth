@@ -245,7 +245,7 @@ func registrationRateLimit(err error) bool {
 
 func TestRegistrationGlobalBudget(t *testing.T) {
 	e := registrationSetup(t)
-	for n := 0; n < 60; n++ {
+	for n := 0; n < 30; n++ {
 		registrationBegin(t, e, fmt.Sprintf("global-%d@umir.invalid", n), fmt.Sprintf("global-%d", n))
 	}
 	before := loadEnrollment(t, e)
@@ -286,5 +286,20 @@ func TestRegistrationOccupiedMixedCaseDomainIsNeutral(t *testing.T) {
 	if result, err := e.store.Commit(ctx, previous, validate(t, a)); err != nil || result.Outcome != application.Committed {
 		t.Fatal(err)
 	}
-	registrationBegin(t, e, "Existing@umir.invalid", "mixed-domain")
+	v := registrationBegin(t, e, "existing@umir.invalid", "mixed-domain")
+	a = loadEnrollment(t, e)
+	foundChallenge, foundJob := false, false
+	for _, c := range a.Challenges {
+		if c.ChallengeID == v.ChallengeID {
+			foundChallenge = c.RegistrationSuppressed
+		}
+	}
+	for _, j := range a.MailJobs {
+		if j.ChallengeID == v.ChallengeID {
+			foundJob = j.State == "suppressed" && j.EncryptedPayload == ""
+		}
+	}
+	if !foundChallenge || !foundJob {
+		t.Fatal("mixed-case occupied address was not suppressed")
+	}
 }

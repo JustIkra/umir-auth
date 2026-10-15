@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/JustIkra/umir-auth/internal/domain"
 )
@@ -44,7 +43,7 @@ type enrollmentChange[T any] struct {
 
 func enrollmentCommand[T any](s *Accounts, ctx context.Context, actor ChallengeActor, operation string, org domain.EntityID, command string, input any, schema string, status int, access func(domain.Aggregate, enrollmentActor) error, change func(*domain.Aggregate, enrollmentActor) (enrollmentChange[T], error)) (T, error) {
 	var zero T
-	if command == "" || !utf8.ValidString(command) || strings.HasPrefix(command, "expiration/") || len(command) > 1<<20 {
+	if !domain.ValidClientCommandID(command) {
 		return zero, &FieldError{Field: "commandID", Code: "InvalidFormat"}
 	}
 	if s.opts.Results == nil {

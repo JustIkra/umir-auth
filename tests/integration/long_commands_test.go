@@ -21,7 +21,9 @@ func TestLongCommandIDsPersistAndReplayAfterRestart(t *testing.T) {
 	commands := []struct{ name, id string }{
 		{"ascii129", strings.Repeat("c", 129)},
 		{"unicode129", strings.Repeat("я", 129)},
-		{"ascii4096", strings.Repeat("c", 4096)},
+		{"ascii256", strings.Repeat("c", 256)},
+		{"unicode256", strings.Repeat("я", 256)},
+		{"emoji256", strings.Repeat("🚀", 256)},
 	}
 	testCommandIDsPersistAndReplay(t, commands)
 }
@@ -179,6 +181,9 @@ func testCommandIDsPersistAndReplay(t *testing.T, commands []struct{ name, id st
 
 func TestInvalidCommandIDsDoNotCommit(t *testing.T) {
 	commands := []struct{ name, id string }{
+		{"ascii257", strings.Repeat("c", 257)},
+		{"unicode257", strings.Repeat("я", 257)},
+		{"legacy4096", strings.Repeat("c", 4096)},
 		{"reserved", "expiration/"},
 		{"reservedWithControls", "expiration/\x00\r\n"},
 		{"invalidByte", string([]byte{0xff})},
@@ -299,5 +304,16 @@ func TestJSONStoreRefusesMalformedCommandUTF8(t *testing.T) {
 				t.Fatalf("malformed UTF-8 in persisted command ID was not refused: %v", err)
 			}
 		})
+	}
+}
+
+func TestLegacyLongCommandRecordsSurviveRegistrationMigration(t *testing.T) {
+	old := commandAggregate(t, strings.Repeat("c", 4096))
+	next, err := domain.UpgradeRegistration(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Idempotency[0].CommandID != old.Idempotency[0].CommandID || next.Idempotency[0].Fingerprint != old.Idempotency[0].Fingerprint || next.Idempotency[0].EncryptedResponse != old.Idempotency[0].EncryptedResponse {
+		t.Fatal("legacy command facts changed")
 	}
 }

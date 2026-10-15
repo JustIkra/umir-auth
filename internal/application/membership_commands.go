@@ -2,14 +2,12 @@ package application
 
 import (
 	"encoding/json"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/JustIkra/umir-auth/internal/domain"
 )
 
 func (s *Accounts) membershipCommand(a domain.Aggregate, actor domain.EntityID, operation string, orgID, membershipID, assignmentID domain.EntityID, commandID string, input []byte) (string, *domain.IdempotencyRecord, error) {
-	if commandID == "" || !utf8.ValidString(commandID) || strings.HasPrefix(commandID, "expiration/") || len(commandID) > 1<<20 {
+	if !domain.ValidClientCommandID(commandID) {
 		return "", nil, &FieldError{Field: "commandID", Code: "InvalidFormat"}
 	}
 	if s.opts.Results == nil {

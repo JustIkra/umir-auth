@@ -101,6 +101,9 @@ func (s *Accounts) challengeAccess(a domain.Aggregate, who enrollmentActor, id d
 		return err
 	}
 	c := a.Challenges[i]
+	if c.Purpose == "login" && !s.opts.EmailLoginEnabled {
+		return ErrForbidden
+	}
 	if c.Purpose == "registration" {
 		if err := s.registrationAccess(a, who); err != nil {
 			return err
@@ -140,7 +143,7 @@ func codeScope(id domain.EntityID, purpose string) string {
 func proofScope(id domain.EntityID, purpose string) string {
 	return "proof:" + string(id) + ":" + purpose
 }
-func (s *Accounts) issueLimit(a domain.Aggregate, email string, now time.Time) error {
+func (s *Accounts) issueLimit(a domain.Aggregate, email, purpose string, now time.Time) error {
 	var global, target []time.Time
 	for _, j := range a.MailJobs {
 		at, err := time.Parse(time.RFC3339Nano, string(j.AcceptedAt))
@@ -150,7 +153,17 @@ func (s *Accounts) issueLimit(a domain.Aggregate, email string, now time.Time) e
 		if now.Sub(at) >= 10*time.Minute {
 			continue
 		}
-		global = append(global, at)
+		registration := false
+		if j.Purpose != "invitation_link" {
+			ci, err := challengeIndex(a, j.ChallengeID)
+			if err != nil {
+				return ErrAuthUnavailable
+			}
+			registration = a.Challenges[ci].Purpose == "registration"
+		}
+		if registration == (purpose == "registration") {
+			global = append(global, at)
+		}
 		other := ""
 		if j.Purpose == "invitation_link" {
 			ii, err := invitationIndex(a, j.InvitationID)
@@ -172,6 +185,8 @@ func (s *Accounts) issueLimit(a domain.Aggregate, email string, now time.Time) e
 				other = a.Invitations[ii].ComparisonEmail
 			} else if c.Purpose == "registration" {
 				other = domain.ComparisonEmail(c.RegistrationEmail)
+			} else if c.SuppressedEmail != "" {
+				other = c.SuppressedEmail
 			} else {
 				u, ok := findUser(a, c.UserID)
 				if !ok {
@@ -180,11 +195,15 @@ func (s *Accounts) issueLimit(a domain.Aggregate, email string, now time.Time) e
 				other = domain.ComparisonEmail(u.Email)
 			}
 		}
-		if other == email {
+		if sameEmail(other, email) {
 			target = append(target, at)
 		}
 	}
-	if delay := max(rollingIssueDelay(global, 60, 10*time.Minute, now), rollingIssueDelay(target, 3, 10*time.Minute, now)); delay > 0 {
+	limit := 60
+	if purpose == "registration" {
+		limit = s.opts.Registration.MailLimitPer10Minutes
+	}
+	if delay := max(rollingIssueDelay(global, limit, 10*time.Minute, now), rollingIssueDelay(target, 3, 10*time.Minute, now)); delay > 0 {
 		return &InvitationRateLimitError{RetryAfter: delay}
 	}
 	return nil
@@ -205,7 +224,7 @@ func (s *Accounts) newChallenge(a *domain.Aggregate, who enrollmentActor, purpos
 		return enrollmentChange[ChallengeView]{}, ErrChallengeCapacity
 	}
 	now := s.opts.Clock.Now()
-	if err := s.issueLimit(*a, domain.ComparisonEmail(email), now); err != nil {
+	if err := s.issueLimit(*a, domain.ComparisonEmail(email), purpose, now); err != nil {
 		return enrollmentChange[ChallengeView]{}, err
 	}
 	id, err := s.newEnrollmentID()
@@ -226,6 +245,9 @@ func (s *Accounts) newChallenge(a *domain.Aggregate, who enrollmentActor, purpos
 		c.RegistrationSuppressed = user.UserID != ""
 		c.UserID = ""
 		c.CredentialVersion = ""
+	}
+	if purpose != "registration" && invite == "" && user.UserID == "" {
+		c.SuppressedEmail = domain.ComparisonEmail(email)
 	}
 	a.Challenges = append(a.Challenges, c)
 	job, err := s.enqueueChallenge(a, c, email, code)
@@ -259,6 +281,9 @@ func (s *Accounts) BeginInvitationChallenge(ctx context.Context, actor Challenge
 		})
 }
 func (s *Accounts) BeginEmailChallenge(ctx context.Context, actor ChallengeActor, in EmailChallengeInput) (ChallengeView, error) {
+	if in.Purpose == "login" && !s.opts.EmailLoginEnabled {
+		return ChallengeView{}, ErrForbidden
+	}
 	if in.Purpose == "registration" && !s.opts.Registration.Enabled {
 		return ChallengeView{}, ErrForbidden
 	}
@@ -278,14 +303,11 @@ func (s *Accounts) BeginEmailChallenge(ctx context.Context, actor ChallengeActor
 	},
 		func(a *domain.Aggregate, who enrollmentActor) (enrollmentChange[ChallengeView], error) {
 			for _, u := range a.Users {
-				if u.Email != "" && domain.ComparisonEmail(u.Email) == comparison {
+				if u.Email != "" && sameEmail(u.Email, comparison) {
 					return s.newChallenge(a, who, in.Purpose, u.Email, "", u)
 				}
 			}
-			if in.Purpose == "registration" {
-				return s.newChallenge(a, who, in.Purpose, in.Email, "", domain.User{})
-			}
-			return enrollmentChange[ChallengeView]{}, ErrChallengeUnavailable
+			return s.newChallenge(a, who, in.Purpose, in.Email, "", domain.User{})
 		})
 }
 func (s *Accounts) ResendChallenge(ctx context.Context, actor ChallengeActor, id domain.EntityID, command string) (ChallengeView, error) {
@@ -321,7 +343,7 @@ func (s *Accounts) ResendChallenge(ctx context.Context, actor ChallengeActor, id
 			if err != nil {
 				return enrollmentChange[ChallengeView]{}, err
 			}
-			if err := s.issueLimit(*a, domain.ComparisonEmail(email), now); err != nil {
+			if err := s.issueLimit(*a, domain.ComparisonEmail(email), c.Purpose, now); err != nil {
 				return enrollmentChange[ChallengeView]{}, err
 			}
 			if s.opts.Challenges == nil {
@@ -383,7 +405,11 @@ func (s *Accounts) VerifyChallenge(ctx context.Context, actor ChallengeActor, in
 			if c.State != "pending" || !before(now, c.ExpiresAt) {
 				return enrollmentChange[VerifiedChallenge]{}, ErrChallengeUnavailable
 			}
-			if _, err := challengeEmail(*a, *c, now); err != nil {
+			email, err := challengeEmail(*a, *c, now)
+			if err != nil {
+				return enrollmentChange[VerifiedChallenge]{}, err
+			}
+			if err := s.wrongCodeLimit(*a, email, now); err != nil {
 				return enrollmentChange[VerifiedChallenge]{}, err
 			}
 			count := 0
@@ -405,8 +431,9 @@ func (s *Accounts) VerifyChallenge(ctx context.Context, actor ChallengeActor, in
 				return enrollmentChange[VerifiedChallenge]{}, ErrAuthUnavailable
 			}
 			digest := s.opts.Challenges.Digest(codeScope(c.ChallengeID, c.Purpose), in.Code)
-			if len(digest) != 64 || subtle.ConstantTimeCompare([]byte(digest), []byte(c.CodeDigest)) != 1 || c.RegistrationSuppressed {
+			if len(digest) != 64 || subtle.ConstantTimeCompare([]byte(digest), []byte(c.CodeDigest)) != 1 || c.RegistrationSuppressed || c.SuppressedEmail != "" {
 				c.WrongAttempts++
+				c.WrongAttemptTimes = append(c.WrongAttemptTimes, formatInstant(now))
 				err := ErrChallengeInvalidCode
 				if c.WrongAttempts == 5 {
 					c.State = "locked"
@@ -435,6 +462,9 @@ func (s *Accounts) VerifyChallenge(ctx context.Context, actor ChallengeActor, in
 		})
 }
 func challengeEmail(a domain.Aggregate, c domain.Challenge, now time.Time) (string, error) {
+	if c.SuppressedEmail != "" {
+		return c.SuppressedEmail, nil
+	}
 	if c.Purpose == "registration" {
 		return c.RegistrationEmail, nil
 	}
@@ -513,7 +543,7 @@ func (s *Accounts) CompleteInvitedUser(ctx context.Context, actor ChallengeActor
 			}
 			v := a.Invitations[ii]
 			for _, u := range a.Users {
-				if domain.ComparisonEmail(u.Email) == v.ComparisonEmail {
+				if sameEmail(u.Email, v.ComparisonEmail) {
 					return enrollmentChange[SessionView]{}, ErrInvitationConflict
 				}
 			}
@@ -573,11 +603,11 @@ func (s *Accounts) AcceptInvitation(ctx context.Context, actor ChallengeActor, i
 				return enrollmentChange[domain.Membership]{}, err
 			}
 			v := a.Invitations[ii]
-			if who.user.Email != "" && domain.ComparisonEmail(who.user.Email) != v.ComparisonEmail {
+			if who.user.Email != "" && !sameEmail(who.user.Email, v.ComparisonEmail) {
 				return enrollmentChange[domain.Membership]{}, ErrForbidden
 			}
 			for _, u := range a.Users {
-				if u.UserID != who.user.UserID && u.Email != "" && domain.ComparisonEmail(u.Email) == v.ComparisonEmail {
+				if u.UserID != who.user.UserID && u.Email != "" && sameEmail(u.Email, v.ComparisonEmail) {
 					return enrollmentChange[domain.Membership]{}, ErrInvitationConflict
 				}
 			}
@@ -622,6 +652,9 @@ func (s *Accounts) acceptMembership(a *domain.Aggregate, u domain.User, v domain
 	return m, nil
 }
 func (s *Accounts) CompleteEmailChallenge(ctx context.Context, actor ChallengeActor, in EmailCompleteInput) (SessionView, error) {
+	if in.Purpose == "login" && !s.opts.EmailLoginEnabled {
+		return SessionView{}, ErrForbidden
+	}
 	if in.Purpose == "registration" {
 		return s.completeRegistration(ctx, actor, in)
 	}

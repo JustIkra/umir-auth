@@ -49,6 +49,9 @@ func (s *Accounts) CreateOrganization(ctx context.Context, token, csrf string, i
 			}
 			return nil
 		}, func(a *domain.Aggregate, u domain.User) (domain.LifecycleIntent, error) {
+			if err := s.organizationCreationLimit(*a, u.UserID); err != nil {
+				return domain.LifecycleIntent{}, err
+			}
 			if len(a.Restaurants) >= 10000 {
 				return domain.LifecycleIntent{}, ErrAuthUnavailable
 			}
@@ -124,7 +127,7 @@ func (s *Accounts) newLifecycleIntent(actor, org domain.EntityID, ids []domain.E
 	return l, nil
 }
 func lifecycleFingerprint(actor, org, restaurant domain.EntityID, operation, command string, input any) (string, error) {
-	if command == "" || !utf8.ValidString(command) || strings.HasPrefix(command, "expiration/") || len(command) > 1<<20 {
+	if !domain.ValidClientCommandID(command) {
 		return "", &FieldError{Field: "commandID", Code: "InvalidFormat"}
 	}
 	encoded, err := json.Marshal(struct {

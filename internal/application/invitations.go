@@ -120,7 +120,7 @@ func (s *Accounts) CreateInvitation(ctx context.Context, token, csrf string, org
 				return enrollmentChange[domain.Invitation]{}, err
 			}
 			now := s.opts.Clock.Now()
-			if err := s.issueLimit(*a, comparison, now); err != nil {
+			if err := s.issueLimit(*a, comparison, "invitation", now); err != nil {
 				return enrollmentChange[domain.Invitation]{}, err
 			}
 			recent := 0
@@ -246,7 +246,7 @@ func (s *Accounts) ResendInvitation(ctx context.Context, token, csrf string, org
 			if c.IssueCount >= 4 || before(now, c.ResendAvailableAt) {
 				return enrollmentChange[DurableResult]{}, ErrChallengeRateLimited
 			}
-			if err := s.issueLimit(*a, invite.ComparisonEmail, now); err != nil {
+			if err := s.issueLimit(*a, invite.ComparisonEmail, "invitation", now); err != nil {
 				return enrollmentChange[DurableResult]{}, err
 			}
 			if s.opts.Challenges == nil {

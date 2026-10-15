@@ -37,6 +37,7 @@ type InitialUser struct {
 	Email             string          `json:"email,omitempty"`
 }
 type Options struct {
+	EmailLoginEnabled               bool
 	Registration                    application.RegistrationOptions
 	InvitationMail                  application.InvitationMailOptions
 	StateFile, SecretsDir, Password string
@@ -184,6 +185,7 @@ func open(ctx context.Context, o Options, imported *domain.ValidatedAggregate) (
 	}
 	accountOptions := application.AccountOptions{Repository: store, Passwords: hasher, Clock: o.Clock, IDs: entropy{}, Tokens: entropy{}, Results: results, Challenges: challenges, Issuer: signer, TimeZones: o.TimeZones, Runtimes: o.Runtimes}
 	accountOptions.Registration = o.Registration
+	accountOptions.EmailLoginEnabled = o.EmailLoginEnabled
 	accountOptions.InvitationMail = o.InvitationMail
 	accountOptions.LinkURLs = invitationurl.Policy{}
 	accountOptions.PageClock = physicalPageClock{}

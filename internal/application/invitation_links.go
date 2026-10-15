@@ -156,7 +156,7 @@ func (s *Accounts) ResendInvitationLink(ctx context.Context, token, csrf string,
 			if delay := rollingIssueDelay(accepted, 5, time.Hour, now); delay > 0 {
 				return enrollmentChange[DurableResult]{}, &InvitationRateLimitError{RetryAfter: delay}
 			}
-			if err := s.issueLimit(*a, v.ComparisonEmail, now); err != nil {
+			if err := s.issueLimit(*a, v.ComparisonEmail, "invitation", now); err != nil {
 				return enrollmentChange[DurableResult]{}, err
 			}
 			job, err := s.enqueueInvitationLink(a, *v)

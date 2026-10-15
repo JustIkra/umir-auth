@@ -6872,7 +6872,8 @@
         "not": {
           "pattern": "^expiration/"
         },
-        "description": "Caller-generated command identity. Preserve the same value and identical input on retry. The expiration/ namespace belongs to warehouse."
+        "description": "Caller-generated command identity. Preserve the same value and identical input on retry. The expiration/ namespace belongs to warehouse.",
+        "maxLength": 256
       },
       "PositiveInt64": {
         "type": "string",
@@ -12744,14 +12745,36 @@
                 "minLength": 1
               },
               "purpose": {
-                "type": "string",
-                "enum": [
-                  "login",
-                  "password_reset"
-                ]
+                "const": "login"
               },
               "rememberMe": {
                 "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "commandID",
+              "challengeID",
+              "proof",
+              "purpose",
+              "newPassword"
+            ],
+            "properties": {
+              "commandID": {
+                "$ref": "#/components/schemas/ClientCommandID"
+              },
+              "challengeID": {
+                "$ref": "#/components/schemas/EntityID"
+              },
+              "proof": {
+                "type": "string",
+                "minLength": 1
+              },
+              "purpose": {
+                "const": "password_reset"
               },
               "newPassword": {
                 "type": "string",
@@ -14352,8 +14375,8 @@
   },
   "x-registration-source": {
     "completion-v1-composed-public.json": "8533e4c119573075214a52ee17dc30472d4cca5f580a99a330fb76ff44905663",
-    "registration-v1-public.json": "686278a533f4c460a454f2a78e5f61c155fbfd1c8dd06bbcc5d57326900be5bf",
+    "registration-v1-public.json": "b6d5558b48228b921563a16de783a2881a3a4e56ba19b6d575ac290d1f015745",
     "completion-v1-composed-private.json": "e562b6e929053d8c1a167eb71a8631c6fadd90d5ff6aed4660b4acf4d22c71c6",
-    "registration-v1-private.json": "faec778473d99430c1ee465496dd41fc71c1efb73f39181e94409790c6d5ab1d"
+    "registration-v1-private.json": "66ccf781c89ed266d573ead7505b25b2e24d7d9398a15daabc9cd350997df9b7"
   }
 }

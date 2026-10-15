@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Resolve registration review issues #5–7: separate mail budget, persisted per-address wrong-code budget, creator organization quota/rate, neutral password reset, default-disabled email-code login, disabled outbox suppression, case-insensitive address ownership, bounded command IDs and registration hashing outside the aggregate lock. Preserve stored identities and replay fingerprints. Document v3 backup-only rollback and the deferred challenge-storage cap.
+
 - Add opt-in public registration through existing email challenges, neutral occupied-address responses, atomic account/session completion and schema-v3 forward migration. Preserve challenge limits, replay results and password login.
 
 - Restore Gateway SSE access checks for the existing `live` operation without adding a bearer-token policy or changing session activity. Retain current scope, role, revocation and runtime checks.

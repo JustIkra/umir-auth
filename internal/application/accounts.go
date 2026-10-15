@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"sync"
@@ -23,25 +22,30 @@ type PasswordHasher interface {
 	Check(string) error
 }
 type RegistrationOptions struct {
-	Enabled bool `json:"enabled"`
+	Enabled                      bool `json:"enabled"`
+	MailLimitPer10Minutes        int  `json:"mailLimitPer10Minutes"`
+	OrganizationsPerUser         int  `json:"organizationsPerUser"`
+	OrganizationCreationsPerHour int  `json:"organizationCreationsPerHour"`
+	WrongCodesPerAddressPerHour  int  `json:"wrongCodesPerAddressPerHour"`
 }
 
 type AccountOptions struct {
-	Registration   RegistrationOptions
-	LinkURLs       InvitationURLPolicy
-	InvitationMail InvitationMailOptions
-	Repository     AggregateRepository
-	Passwords      PasswordHasher
-	Clock          Clock
-	PageClock      Clock
-	PageAfter      func(time.Duration, func()) PageExpiryTimer
-	IDs            IDGenerator
-	Tokens         TokenSource
-	Results        ResultSecrets
-	Challenges     ChallengeSecrets
-	Issuer         UserTokenIssuer
-	TimeZones      TimeZoneCatalog
-	Runtimes       RuntimePeers
+	EmailLoginEnabled bool
+	Registration      RegistrationOptions
+	LinkURLs          InvitationURLPolicy
+	InvitationMail    InvitationMailOptions
+	Repository        AggregateRepository
+	Passwords         PasswordHasher
+	Clock             Clock
+	PageClock         Clock
+	PageAfter         func(time.Duration, func()) PageExpiryTimer
+	IDs               IDGenerator
+	Tokens            TokenSource
+	Results           ResultSecrets
+	Challenges        ChallengeSecrets
+	Issuer            UserTokenIssuer
+	TimeZones         TimeZoneCatalog
+	Runtimes          RuntimePeers
 }
 type Accounts struct {
 	opts              AccountOptions
@@ -85,6 +89,9 @@ type SessionView struct {
 func NewAccounts(ctx context.Context, o AccountOptions) (*Accounts, error) {
 	if o.Repository == nil || o.Passwords == nil || o.Clock == nil || o.IDs == nil || o.Tokens == nil {
 		return nil, ErrAuthUnavailable
+	}
+	if err := registrationDefaults(&o.Registration); err != nil {
+		return nil, err
 	}
 	a, err := o.Repository.Load(ctx)
 	if err != nil {
@@ -202,7 +209,7 @@ func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error
 	var user domain.User
 	known := false
 	for _, u := range a.Users {
-		if subtle.ConstantTimeCompare([]byte(u.Login), []byte(in.Login)) == 1 {
+		if loginMatches(u.Login, in.Login) {
 			user = u
 			known = true
 			break
@@ -215,7 +222,8 @@ func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error
 		s.mu.Unlock()
 		return SessionView{}, ErrInvalidCredentials
 	}
-	th, err := s.loginFailures.acquire(in.Login, s.opts.Clock.Now())
+	budgetLogin := normalizedEmailLogin(in.Login)
+	th, err := s.loginFailures.acquire(budgetLogin, s.opts.Clock.Now())
 	if err != nil {
 		s.mu.Unlock()
 		return SessionView{}, err

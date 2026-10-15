@@ -143,7 +143,7 @@ func pollLifecycle(t *testing.T, f *membershipFixture, v application.LifecycleRe
 }
 func TestA6CreationAtomicAcceptanceReplayAndCurrentEpoch(t *testing.T) {
 	f, p := lifecycleSetup(t)
-	in := application.CreateOrganizationInput{CommandID: strings.Repeat("opaque", 100), Name: "New Organization", TimeZone: "America/New_York", FirstRestaurantName: "First"}
+	in := application.CreateOrganizationInput{CommandID: strings.Repeat("opaque", 40), Name: "New Organization", TimeZone: "America/New_York", FirstRestaurantName: "First"}
 	accepted, err := f.accounts.CreateOrganization(ctx, f.worker.Token, f.worker.CSRFToken, in)
 	if err != nil {
 		t.Fatal(err)

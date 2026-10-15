@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/JustIkra/umir-auth/internal/domain"
 )
@@ -24,7 +23,7 @@ func (s *Accounts) loginCommand(a domain.Aggregate, in LoginInput) (string, *Ses
 	if s.opts.Results == nil {
 		return "", nil, ErrAuthUnavailable
 	}
-	if !utf8.ValidString(in.CommandID) || strings.HasPrefix(in.CommandID, "expiration/") || len(in.CommandID) > 1<<20 {
+	if !domain.ValidClientCommandID(in.CommandID) {
 		return "", nil, &FieldError{Field: "commandID", Code: "InvalidFormat"}
 	}
 	if len(in.PreauthDigest) != 64 || strings.ContainsFunc(in.PreauthDigest, func(r rune) bool { return r < '0' || r > '9' && r < 'a' || r > 'f' }) {

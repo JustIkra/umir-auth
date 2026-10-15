@@ -27,6 +27,7 @@ func text(s string, min, max int) bool {
 	n := utf8.RuneCountInString(s)
 	return utf8.ValidString(s) && n >= min && n <= max && !strings.ContainsAny(s, "\x00\r\n")
 }
+func ValidClientCommandID(s string) bool { return commandText(s) && utf8.RuneCountInString(s) <= 256 }
 func commandText(s string) bool {
 	return s != "" && utf8.ValidString(s) && !strings.HasPrefix(s, "expiration/")
 }
@@ -261,6 +262,19 @@ func (v *validation) challengeRecords(a Aggregate) bool {
 		if c.Purpose != "registration" && (c.RegistrationEmail != "" || c.RegistrationSuppressed) {
 			return false
 		}
+		if c.SuppressedEmail != "" {
+			if a.SchemaVersion != 3 || !oneOf(c.Purpose, "login", "password_reset") || !email(c.SuppressedEmail) || c.SuppressedEmail != ComparisonEmail(c.SuppressedEmail) || c.UserID != "" || c.CredentialVersion != "" || c.InvitationID != "" || oneOf(c.State, "verified", "completed") {
+				return false
+			}
+		}
+		if len(c.WrongAttemptTimes) > c.WrongAttempts || a.SchemaVersion < 3 && len(c.WrongAttemptTimes) > 0 {
+			return false
+		}
+		for i, at := range c.WrongAttemptTimes {
+			if _, ok := instant(at); !ok || i > 0 && !ordered(c.WrongAttemptTimes[i-1], at) {
+				return false
+			}
+		}
 		switch c.Purpose {
 		case "registration":
 			if a.SchemaVersion != 3 || !email(c.RegistrationEmail) || c.RegistrationEmail != ComparisonEmail(c.RegistrationEmail) || c.UserID != "" || c.CredentialVersion != "" || c.InvitationID != "" || c.RegistrationSuppressed && oneOf(c.State, "verified", "completed") {
@@ -274,7 +288,7 @@ func (v *validation) challengeRecords(a Aggregate) bool {
 			u, ok := v.users[c.UserID]
 			cv, cvok := VersionNumber(c.CredentialVersion)
 			uv, _ := VersionNumber(u.CredentialVersion)
-			if !ok || !cvok || cv > uv || c.InvitationID != "" {
+			if c.SuppressedEmail == "" && (!ok || !cvok || cv > uv || c.InvitationID != "") {
 				return false
 			}
 		}
@@ -464,6 +478,9 @@ func clone(a Aggregate) Aggregate {
 	a.Sessions = slices.Clone(a.Sessions)
 	a.Invitations = slices.Clone(a.Invitations)
 	a.Challenges = slices.Clone(a.Challenges)
+	for i := range a.Challenges {
+		a.Challenges[i].WrongAttemptTimes = slices.Clone(a.Challenges[i].WrongAttemptTimes)
+	}
 	a.MailJobs = slices.Clone(a.MailJobs)
 	a.Idempotency = slices.Clone(a.Idempotency)
 	a.LifecycleIntents = slices.Clone(a.LifecycleIntents)

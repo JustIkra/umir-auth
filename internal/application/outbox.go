@@ -69,7 +69,7 @@ func (s *Accounts) enqueueChallenge(a *domain.Aggregate, c domain.Challenge, ema
 		}
 		j.OrgID = a.Invitations[i].OrgID
 	}
-	if c.RegistrationSuppressed {
+	if c.RegistrationSuppressed || c.SuppressedEmail != "" {
 		j.State = "suppressed"
 		j.EncryptedPayload = ""
 		j.NextAttemptAt = ""
@@ -328,9 +328,10 @@ func (s *Accounts) claimMail(ctx context.Context) (MailDelivery, int, bool, erro
 		}
 		c := a.Challenges[ci]
 		email, admissionErr := challengeEmail(a, c, now)
-		if c.State != "pending" || !before(now, c.ExpiresAt) || admissionErr != nil || j.Attempts >= 3 {
+		disabled := c.Purpose == "registration" && !s.opts.Registration.Enabled || c.Purpose == "login" && !s.opts.EmailLoginEnabled
+		if disabled || c.State != "pending" || !before(now, c.ExpiresAt) || admissionErr != nil || j.Attempts >= 3 {
 			j.State = "suppressed"
-			if j.Attempts >= 3 && admissionErr == nil && c.State == "pending" && before(now, c.ExpiresAt) {
+			if !disabled && j.Attempts >= 3 && admissionErr == nil && c.State == "pending" && before(now, c.ExpiresAt) {
 				j.State = "failed"
 			}
 			j.EncryptedPayload = ""

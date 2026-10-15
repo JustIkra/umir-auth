@@ -32,6 +32,7 @@ func enrollmentSetup(t *testing.T) *enrollmentFixture {
 		t.Fatal(err)
 	}
 	f.opts.Challenges = crypto
+	f.opts.EmailLoginEnabled = true
 	f.opts.InvitationMail = application.InvitationMailOptions{FrontendOrigin: "https://app.umir.invalid"}
 	f.opts.LinkURLs = invitationurl.Policy{}
 	f.accounts, err = application.NewAccounts(ctx, f.opts)
