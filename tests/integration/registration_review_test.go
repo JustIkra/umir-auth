@@ -14,6 +14,7 @@ import (
 	"github.com/JustIkra/umir-auth/internal/adapters/timezones"
 
 	"github.com/JustIkra/umir-auth/internal/application"
+	"github.com/JustIkra/umir-auth/internal/domain"
 )
 
 func TestRegistrationBudgetDoesNotConsumeResetBudget(t *testing.T) {
@@ -365,5 +366,71 @@ func TestRegistrationAndInvitationRaceCreatesOnlyOneAccount(t *testing.T) {
 	}
 	if success != 1 || conflict != 1 || len(loadEnrollment(t, e).Users) != len(before.Users)+1 {
 		t.Fatal("invitation and registration created duplicate accounts")
+	}
+}
+
+type registrationConflictOnce struct {
+	application.AggregateRepository
+	conflicted bool
+}
+
+func (r *registrationConflictOnce) Commit(c context.Context, v domain.Version, n domain.ValidatedAggregate) (application.CommitResult, error) {
+	if !r.conflicted {
+		r.conflicted = true
+		return application.CommitResult{Outcome: application.NotCommitted}, application.ErrRevisionConflict
+	}
+	return r.AggregateRepository.Commit(c, v, n)
+}
+
+type registrationCountingHasher struct {
+	application.PasswordHasher
+	hashes int
+}
+
+func (h *registrationCountingHasher) Hash(p string) (string, error) {
+	h.hashes++
+	return h.PasswordHasher.Hash(p)
+}
+func TestRegistrationRevisionRetryReusesPasswordHash(t *testing.T) {
+	e := registrationSetup(t)
+	p := registrationProof(t, e, registrationBegin(t, e, "revision@umir.invalid", "revision"), "revision-proof")
+	h := &registrationCountingHasher{PasswordHasher: e.opts.Passwords}
+	e.opts.Passwords = h
+	e.opts.Repository = &registrationConflictOnce{AggregateRepository: e.store}
+	var err error
+	e.accounts, err = application.NewAccounts(ctx, e.opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := loadEnrollment(t, e)
+	if _, err := e.accounts.CompleteEmailChallenge(ctx, e.actor, registrationComplete(p, "revision-complete")); err != nil {
+		t.Fatal(err)
+	}
+	if h.hashes != 1 || len(loadEnrollment(t, e).Users) != len(before.Users)+1 {
+		t.Fatal("revision retry repeated password work or account creation")
+	}
+}
+func TestRegistrationSeparateGlobalBudgetCountsOccupiedAndFreeEqually(t *testing.T) {
+	e := registrationSetup(t)
+	p := registrationProof(t, e, registrationBegin(t, e, "existing-budget@umir.invalid", "existing-budget"), "existing-budget-proof")
+	if _, err := e.accounts.CompleteEmailChallenge(ctx, e.actor, registrationComplete(p, "existing-budget-complete")); err != nil {
+		t.Fatal(err)
+	}
+	e.advance(t, 11*time.Minute)
+	e.opts.Registration.MailLimitPer10Minutes = 2
+	var err error
+	e.accounts, err = application.NewAccounts(ctx, e.opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registrationBegin(t, e, "existing-budget@umir.invalid", "suppressed-budget")
+	registrationBegin(t, e, "free-budget@umir.invalid", "free-budget")
+	for _, email := range []string{"existing-budget@umir.invalid", "free-budget@umir.invalid"} {
+		if _, err := e.accounts.BeginEmailChallenge(ctx, e.actor, application.EmailChallengeInput{CommandID: "over-" + email, Email: email, Purpose: "registration"}); !registrationRateLimit(err) {
+			t.Fatal("occupied and free global budgets differ")
+		}
+	}
+	if _, err := e.accounts.BeginEmailChallenge(ctx, e.actor, application.EmailChallengeInput{CommandID: "independent-reset", Email: "reset-budget@umir.invalid", Purpose: "password_reset"}); err != nil {
+		t.Fatal("registration consumed reset global budget")
 	}
 }
