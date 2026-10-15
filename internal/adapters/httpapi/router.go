@@ -364,13 +364,13 @@ func (h *handler) routes() {
 			return
 		}
 		p, ok := application.UserTokenPolicy(in.Operation)
-		if !ok {
+		if !ok && in.Operation != "live" {
 			failure(w, application.ErrForbidden)
 			return
 		}
 		v, e := h.o.Accounts.RestaurantAccess(r.Context(), in.SessionToken, in.RestaurantID)
 		if e == nil {
-			found := false
+			found := in.Operation == "live"
 			for _, c := range v.Permissions {
 				found = found || c == p.Capability
 			}

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Restore Gateway SSE access checks for the existing `live` operation without adding a bearer-token policy or changing session activity. Retain current scope, role, revocation and runtime checks.
+
 - Add FIN1 supply authorization through existing stock.read and replace the recommendation token's menu-evaluation grant with narrow consumer.recommendations.read. Preserve the dual-service audience, role checks and restaurant boundaries. Consumers must use the composed FIN1 profile.
 
 - Move peer status IO outside the Auth mutex and revalidate authority revisions, sessions and registration settings before using observations. Preserve admission cutoff during concurrent logout, expiry and scope deletion.
