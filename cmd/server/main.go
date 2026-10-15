@@ -18,7 +18,7 @@ func main() {
 		path = "/etc/umir-auth/config.json"
 	}
 	if e := bootstrap.Run(ctx, path); e != nil {
-		if _, e = fmt.Fprintln(os.Stderr, "Auth startup or runtime failed"); e != nil {
+		if _, e = fmt.Fprintln(os.Stderr, e); e != nil {
 			os.Exit(1)
 		}
 		os.Exit(1)

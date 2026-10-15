@@ -72,6 +72,26 @@ func ReadPrivateFile(p string, limit int64) ([]byte, error) {
 	}
 	return b, nil
 }
+
+func readTextCredential(p string, limit int64) ([]byte, error) {
+	b, err := ReadPrivateFile(p, limit+2)
+	if err != nil {
+		return nil, err
+	}
+	end := len(b)
+	if end > 0 && b[end-1] == '\n' {
+		end--
+		if end > 0 && b[end-1] == '\r' {
+			end--
+		}
+	}
+	if end == 0 || int64(end) > limit {
+		clear(b)
+		return nil, ErrNotReady
+	}
+	return b[:end], nil
+}
+
 func DecodeStrict(b []byte, v any) error {
 	if !utf8.Valid(b) || strictjson.CheckText(b) != nil {
 		return ErrNotReady

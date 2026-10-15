@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add pinned Auth CI with complete Go quality/race gates, dependency checks and a real production-image startup/readiness smoke. Registry publication remains separate.
+- Isolate password-login cooldowns by exact Login, bound retained counters to 4096 without evicting live attempts, and recheck cooldown after verification. Preserve the global verification queue limits.
+- Read one optional LF/CRLF from text password and SMTP credential files. Preserve spaces, raw key bytes and private-file admission. Report safe startup stages while retaining wrapped diagnostic causes.
+
 - Add a separate closed UA1 control wire/CLI in serve-ui-ua1, exact actual
   business-body/actor observation, non-evicting request replay and strict client
   validation. Route the one mail worker through an additive bootstrap processor

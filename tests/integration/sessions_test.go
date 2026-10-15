@@ -514,15 +514,22 @@ func TestDisplayNameCompatibilityAndDurableCommand(t *testing.T) {
 		t.Fatal("profile not durable")
 	}
 }
-func TestLoginCooldownPreservesProcessPolicy(t *testing.T) {
-	s, _, _, m, _ := setup(t)
+func TestLoginCooldownIsIsolatedByLogin(t *testing.T) {
+	s, _, c, m, _ := setup(t)
 	for range 5 {
 		if _, err := s.Login(ctx, application.LoginInput{Login: "owner", Password: "wrong"}); !errors.Is(err, application.ErrInvalidCredentials) {
 			t.Fatal(err)
 		}
 	}
 	before := m.verifications
-	if _, err := s.Login(ctx, application.LoginInput{Login: "second", Password: "password"}); !errors.Is(err, application.ErrLoginRateLimited) || m.verifications != before {
-		t.Fatal("existing process cooldown bypassed by another login")
+	if _, err := s.Login(ctx, application.LoginInput{Login: "second", Password: "password"}); err != nil || m.verifications != before+1 {
+		t.Fatal("another login inherited the first login's cooldown", err)
+	}
+	if _, err := s.Login(ctx, application.LoginInput{Login: "owner", Password: "password"}); !errors.Is(err, application.ErrLoginRateLimited) || m.verifications != before+1 {
+		t.Fatal("another login reset the first login's cooldown", err)
+	}
+	c.advance(time.Minute)
+	if _, err := s.Login(ctx, application.LoginInput{Login: "owner", Password: "password"}); err != nil {
+		t.Fatal("expired login cooldown did not recover", err)
 	}
 }

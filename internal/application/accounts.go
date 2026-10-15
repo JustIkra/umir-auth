@@ -45,7 +45,7 @@ type Accounts struct {
 	recovering        bool
 	gate              *verificationGate
 	changing          chan struct{}
-	loginFailures     failureThrottle
+	loginFailures     loginThrottles
 	passwordFailures  map[domain.EntityID]*failureThrottle
 	organizationPages organizationPages
 }
@@ -210,7 +210,16 @@ func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error
 		s.mu.Unlock()
 		return SessionView{}, ErrInvalidCredentials
 	}
-	th := &s.loginFailures
+	th, err := s.loginFailures.acquire(in.Login, s.opts.Clock.Now())
+	if err != nil {
+		s.mu.Unlock()
+		return SessionView{}, err
+	}
+	defer func() {
+		s.mu.Lock()
+		s.loginFailures.release(th)
+		s.mu.Unlock()
+	}()
 	if wait := th.wait(s.opts.Clock.Now()); wait > 0 {
 		s.mu.Unlock()
 		return SessionView{}, rateLimited(wait)
@@ -253,6 +262,9 @@ func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error
 	}
 	if replay != nil {
 		return *replay, nil
+	}
+	if wait := th.wait(s.opts.Clock.Now()); wait > 0 {
+		return SessionView{}, rateLimited(wait)
 	}
 	if !ok || !known {
 		th.fail(s.opts.Clock.Now(), 5, time.Minute, time.Minute)
