@@ -52,7 +52,7 @@ func (h *handler) enrollmentRoutes() {
 		if in.ChallengeID != pathID(r, "challengeID") {
 			return sessionIssued{}, application.ErrForbidden
 		}
-		v, e := h.o.Accounts.CompleteEmailChallenge(r.Context(), h.actor(r), application.EmailCompleteInput{CommandID: in.CommandID, ChallengeID: pathID(r, "challengeID"), Proof: in.Proof, Purpose: in.Purpose, RememberMe: in.RememberMe, NewPassword: in.NewPassword})
+		v, e := h.o.Accounts.CompleteEmailChallenge(r.Context(), h.actor(r), application.EmailCompleteInput{CommandID: in.CommandID, ChallengeID: pathID(r, "challengeID"), Proof: in.Proof, Purpose: in.Purpose, RememberMe: in.RememberMe, NewPassword: in.NewPassword, DisplayName: in.DisplayName, Password: in.Password})
 		return wireSession(v), e
 	})
 }

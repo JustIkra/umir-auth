@@ -94,22 +94,24 @@ type Invitation struct {
 	Version           Version            `json:"version"`
 }
 type Challenge struct {
-	ChallengeID       EntityID `json:"challengeID"`
-	Purpose           string   `json:"purpose"`
-	InvitationID      EntityID `json:"invitationID,omitempty"`
-	UserID            EntityID `json:"userID,omitempty"`
-	CredentialVersion Version  `json:"credentialVersion,omitempty"`
-	InitiatorDigest   string   `json:"initiatorDigest"`
-	CodeDigest        string   `json:"codeDigest"`
-	EncryptedCode     string   `json:"encryptedCode"`
-	ProofDigest       string   `json:"proofDigest,omitempty"`
-	EncryptedProof    string   `json:"encryptedProof,omitempty"`
-	ProofExpiresAt    Instant  `json:"proofExpiresAt,omitempty"`
-	ExpiresAt         Instant  `json:"expiresAt"`
-	ResendAvailableAt Instant  `json:"resendAvailableAt"`
-	State             string   `json:"state"`
-	IssueCount        int      `json:"issueCount"`
-	WrongAttempts     int      `json:"wrongAttempts"`
+	RegistrationEmail      string   `json:"registrationEmail,omitempty"`
+	RegistrationSuppressed bool     `json:"registrationSuppressed,omitempty"`
+	ChallengeID            EntityID `json:"challengeID"`
+	Purpose                string   `json:"purpose"`
+	InvitationID           EntityID `json:"invitationID,omitempty"`
+	UserID                 EntityID `json:"userID,omitempty"`
+	CredentialVersion      Version  `json:"credentialVersion,omitempty"`
+	InitiatorDigest        string   `json:"initiatorDigest"`
+	CodeDigest             string   `json:"codeDigest"`
+	EncryptedCode          string   `json:"encryptedCode"`
+	ProofDigest            string   `json:"proofDigest,omitempty"`
+	EncryptedProof         string   `json:"encryptedProof,omitempty"`
+	ProofExpiresAt         Instant  `json:"proofExpiresAt,omitempty"`
+	ExpiresAt              Instant  `json:"expiresAt"`
+	ResendAvailableAt      Instant  `json:"resendAvailableAt"`
+	State                  string   `json:"state"`
+	IssueCount             int      `json:"issueCount"`
+	WrongAttempts          int      `json:"wrongAttempts"`
 }
 type MailJob struct {
 	Purpose          string   `json:"purpose,omitempty"`

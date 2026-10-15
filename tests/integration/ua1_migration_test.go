@@ -11,8 +11,8 @@ import (
 func TestUA1AccountsUpgradeBeforeAdmissionAndReopen(t *testing.T) {
 	f := membershipsSetup(t)
 	first := f.snapshot(t)
-	if first.SchemaVersion != 2 {
-		t.Fatalf("legacy store admitted without v2 upgrade: %d", first.SchemaVersion)
+	if first.SchemaVersion != 3 {
+		t.Fatalf("legacy store admitted without current schema upgrade: %d", first.SchemaVersion)
 	}
 	if err := f.store.Close(); err != nil {
 		t.Fatal(err)

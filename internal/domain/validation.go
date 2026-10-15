@@ -119,7 +119,7 @@ func (v *validation) restaurant(id, org EntityID) bool {
 	return ok && r.OrgID == org
 }
 func Validate(a Aggregate) (ValidatedAggregate, error) {
-	if (a.SchemaVersion != 1 && a.SchemaVersion != 2) || !version(a.AggregateRevision) || a.Users == nil || a.Organizations == nil || a.Restaurants == nil || a.Memberships == nil || a.Sessions == nil || a.Invitations == nil || a.Challenges == nil || a.MailJobs == nil || a.Idempotency == nil || a.LifecycleIntents == nil || a.Tombstones == nil {
+	if (a.SchemaVersion != 1 && a.SchemaVersion != 2 && a.SchemaVersion != 3) || !version(a.AggregateRevision) || a.Users == nil || a.Organizations == nil || a.Restaurants == nil || a.Memberships == nil || a.Sessions == nil || a.Invitations == nil || a.Challenges == nil || a.MailJobs == nil || a.Idempotency == nil || a.LifecycleIntents == nil || a.Tombstones == nil {
 		return ValidatedAggregate{}, ErrInvalidAggregate
 	}
 	v := validation{ids: map[EntityID]bool{}, users: map[EntityID]User{}, orgs: map[EntityID]Organization{}, restaurants: map[EntityID]Restaurant{}, invites: map[EntityID]Invitation{}, challenges: map[EntityID]Challenge{}, jobs: map[EntityID]MailJob{}}
@@ -255,14 +255,22 @@ func (v *validation) challengeRecords(a Aggregate) bool {
 		return false
 	}
 	for _, c := range a.Challenges {
-		if !v.identity(c.ChallengeID) || !oneOf(c.Purpose, "invitation", "login", "password_reset") || !validDigest(c.InitiatorDigest) || !validDigest(c.CodeDigest) || (c.EncryptedCode != "" && !text(c.EncryptedCode, 1, 16384)) || (c.State == "pending" && c.EncryptedCode == "") || !ordered(c.ResendAvailableAt, c.ExpiresAt) || !oneOf(c.State, "pending", "verified", "completed", "expired", "locked") || c.IssueCount < 1 || c.IssueCount > 4 || c.WrongAttempts < 0 || c.WrongAttempts > 5 {
+		if !v.identity(c.ChallengeID) || !oneOf(c.Purpose, "invitation", "login", "password_reset", "registration") || !validDigest(c.InitiatorDigest) || !validDigest(c.CodeDigest) || (c.EncryptedCode != "" && !text(c.EncryptedCode, 1, 16384)) || (c.State == "pending" && c.EncryptedCode == "") || !ordered(c.ResendAvailableAt, c.ExpiresAt) || !oneOf(c.State, "pending", "verified", "completed", "expired", "locked") || c.IssueCount < 1 || c.IssueCount > 4 || c.WrongAttempts < 0 || c.WrongAttempts > 5 {
 			return false
 		}
-		if c.Purpose == "invitation" {
+		if c.Purpose != "registration" && (c.RegistrationEmail != "" || c.RegistrationSuppressed) {
+			return false
+		}
+		switch c.Purpose {
+		case "registration":
+			if a.SchemaVersion != 3 || !email(c.RegistrationEmail) || c.RegistrationEmail != ComparisonEmail(c.RegistrationEmail) || c.UserID != "" || c.CredentialVersion != "" || c.InvitationID != "" || c.RegistrationSuppressed && oneOf(c.State, "verified", "completed") {
+				return false
+			}
+		case "invitation":
 			if _, ok := v.invites[c.InvitationID]; !ok || c.UserID != "" || c.CredentialVersion != "" {
 				return false
 			}
-		} else {
+		default:
 			u, ok := v.users[c.UserID]
 			cv, cvok := VersionNumber(c.CredentialVersion)
 			uv, _ := VersionNumber(u.CredentialVersion)
@@ -288,11 +296,11 @@ func (v *validation) mail(a Aggregate) bool {
 	order := int64(0)
 	for _, j := range a.MailJobs {
 		c, ok := v.challenges[j.ChallengeID]
-		link := a.SchemaVersion == 2 && j.Purpose == "invitation_link"
+		link := a.SchemaVersion >= 2 && j.Purpose == "invitation_link"
 		if a.SchemaVersion == 1 && (j.Purpose != "" || j.EnqueueOrder != "") {
 			return false
 		}
-		if a.SchemaVersion == 2 {
+		if a.SchemaVersion >= 2 {
 			n, valid := VersionNumber(j.EnqueueOrder)
 			if !valid || n <= order || !oneOf(j.Purpose, "otp", "invitation_link") {
 				return false
@@ -334,7 +342,7 @@ func (v *validation) commands(a Aggregate) bool {
 	linkBindings := map[EntityID]int{}
 	revision, _ := VersionNumber(a.AggregateRevision)
 	for _, r := range a.Idempotency {
-		if a.SchemaVersion == 1 && r.ContractProfile != "" || a.SchemaVersion == 2 && !oneOf(r.ContractProfile, "C2", "UA1") {
+		if a.SchemaVersion == 1 && r.ContractProfile != "" || a.SchemaVersion >= 2 && !oneOf(r.ContractProfile, "C2", "UA1") {
 			return false
 		}
 		_, actor := v.users[r.ActorID]

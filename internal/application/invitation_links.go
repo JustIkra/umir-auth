@@ -51,7 +51,7 @@ func (s *Accounts) enqueueInvitationLink(a *domain.Aggregate, invitation domain.
 	if err != nil {
 		return "", err
 	}
-	if s.opts.Challenges == nil || a.SchemaVersion != 2 {
+	if s.opts.Challenges == nil || a.SchemaVersion < 2 {
 		return "", ErrDeliveryUnavailable
 	}
 	id, err := s.newEnrollmentID()

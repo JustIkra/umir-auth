@@ -190,7 +190,6 @@ func publicScope(a domain.Aggregate, org domain.EntityID) error {
 	}
 	return ErrForbidden
 }
-func noEnrollmentScope(domain.Aggregate, enrollmentActor) error { return nil }
 func (s *Accounts) newEnrollmentID() (domain.EntityID, error) {
 	id, err := s.opts.IDs.NewID()
 	if err != nil {

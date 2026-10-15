@@ -18,11 +18,15 @@ func sameCommand(a, b IdempotencyRecord) bool {
 func ValidateReplacement(previous, next ValidatedAggregate) error {
 	before, after := previous.data, next.data
 	if before.SchemaVersion != after.SchemaVersion {
-		if before.SchemaVersion != 1 || after.SchemaVersion != 2 {
+		if before.SchemaVersion > after.SchemaVersion || after.SchemaVersion > 3 {
 			return ErrInvalidAggregate
 		}
 		var err error
-		before, err = UpgradeV1(before)
+		if after.SchemaVersion == 2 {
+			before, err = UpgradeV1(before)
+		} else {
+			before, err = UpgradeRegistration(before)
+		}
 		if err != nil {
 			return err
 		}
@@ -114,7 +118,7 @@ func ValidateReplacement(previous, next ValidatedAggregate) error {
 	}
 	for _, c := range before.Challenges {
 		n, ok := challenges[c.ChallengeID]
-		if !ok || c.Purpose != n.Purpose || c.InvitationID != n.InvitationID || c.UserID != n.UserID || c.CredentialVersion != n.CredentialVersion || c.InitiatorDigest != n.InitiatorDigest || c.ExpiresAt != n.ExpiresAt || c.CodeDigest != n.CodeDigest || c.EncryptedCode != n.EncryptedCode && (n.EncryptedCode != "" || n.State == "pending") || !ordered(c.ResendAvailableAt, n.ResendAvailableAt) || c.IssueCount > n.IssueCount || c.WrongAttempts > n.WrongAttempts || c.ProofDigest != "" && (c.ProofDigest != n.ProofDigest || c.EncryptedProof != n.EncryptedProof || c.ProofExpiresAt != n.ProofExpiresAt) || c.State == "verified" && !oneOf(n.State, "verified", "completed") || oneOf(c.State, "completed", "expired", "locked") && n.State != c.State {
+		if !ok || c.RegistrationEmail != n.RegistrationEmail || c.RegistrationSuppressed != n.RegistrationSuppressed || c.Purpose != n.Purpose || c.InvitationID != n.InvitationID || c.UserID != n.UserID || c.CredentialVersion != n.CredentialVersion || c.InitiatorDigest != n.InitiatorDigest || c.ExpiresAt != n.ExpiresAt || c.CodeDigest != n.CodeDigest || c.EncryptedCode != n.EncryptedCode && (n.EncryptedCode != "" || n.State == "pending") || !ordered(c.ResendAvailableAt, n.ResendAvailableAt) || c.IssueCount > n.IssueCount || c.WrongAttempts > n.WrongAttempts || c.ProofDigest != "" && (c.ProofDigest != n.ProofDigest || c.EncryptedProof != n.EncryptedProof || c.ProofExpiresAt != n.ProofExpiresAt) || c.State == "verified" && !oneOf(n.State, "verified", "completed") || oneOf(c.State, "completed", "expired", "locked") && n.State != c.State {
 			return ErrInvalidAggregate
 		}
 	}

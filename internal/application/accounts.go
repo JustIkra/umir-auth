@@ -22,7 +22,12 @@ type PasswordHasher interface {
 	Verify(string, string) (bool, error)
 	Check(string) error
 }
+type RegistrationOptions struct {
+	Enabled bool `json:"enabled"`
+}
+
 type AccountOptions struct {
+	Registration   RegistrationOptions
 	LinkURLs       InvitationURLPolicy
 	InvitationMail InvitationMailOptions
 	Repository     AggregateRepository
@@ -111,8 +116,8 @@ func NewAccounts(ctx context.Context, o AccountOptions) (*Accounts, error) {
 			return nil, ErrAuthUnavailable
 		}
 	}
-	if a.Snapshot().SchemaVersion == 1 {
-		upgraded, err := domain.UpgradeV1(a.Snapshot())
+	if a.Snapshot().SchemaVersion < 3 {
+		upgraded, err := domain.UpgradeRegistration(a.Snapshot())
 		if err != nil {
 			return nil, errors.Join(ErrAuthUnavailable, err)
 		}

@@ -74,6 +74,8 @@ type EmailChallengeInput struct {
 	Purpose   string `json:"purpose"`
 }
 type EmailCompleteInput struct {
+	DisplayName string          `json:"displayName,omitempty"`
+	Password    string          `json:"password,omitempty"`
 	CommandID   string          `json:"commandID"`
 	ChallengeID domain.EntityID `json:"challengeID"`
 	Proof       string          `json:"proof"`
@@ -99,6 +101,11 @@ func (s *Accounts) challengeAccess(a domain.Aggregate, who enrollmentActor, id d
 		return err
 	}
 	c := a.Challenges[i]
+	if c.Purpose == "registration" {
+		if err := s.registrationAccess(a, who); err != nil {
+			return err
+		}
+	}
 	if c.InitiatorDigest != who.initiator {
 		return ErrChallengeUnavailable
 	}
@@ -163,6 +170,8 @@ func (s *Accounts) issueLimit(a domain.Aggregate, email string, now time.Time) e
 					return ErrAuthUnavailable
 				}
 				other = a.Invitations[ii].ComparisonEmail
+			} else if c.Purpose == "registration" {
+				other = domain.ComparisonEmail(c.RegistrationEmail)
 			} else {
 				u, ok := findUser(a, c.UserID)
 				if !ok {
@@ -212,6 +221,12 @@ func (s *Accounts) newChallenge(a *domain.Aggregate, who enrollmentActor, purpos
 		return enrollmentChange[ChallengeView]{}, ErrAuthUnavailable
 	}
 	c := domain.Challenge{ChallengeID: id, Purpose: purpose, InvitationID: invite, UserID: user.UserID, CredentialVersion: user.CredentialVersion, InitiatorDigest: who.initiator, CodeDigest: s.opts.Challenges.Digest(codeScope(id, purpose), code), EncryptedCode: sealed, ExpiresAt: formatInstant(now.Add(10 * time.Minute)), ResendAvailableAt: formatInstant(now.Add(time.Minute)), State: "pending", IssueCount: 1}
+	if purpose == "registration" {
+		c.RegistrationEmail = domain.ComparisonEmail(email)
+		c.RegistrationSuppressed = user.UserID != ""
+		c.UserID = ""
+		c.CredentialVersion = ""
+	}
 	a.Challenges = append(a.Challenges, c)
 	job, err := s.enqueueChallenge(a, c, email, code)
 	if err != nil {
@@ -244,20 +259,31 @@ func (s *Accounts) BeginInvitationChallenge(ctx context.Context, actor Challenge
 		})
 }
 func (s *Accounts) BeginEmailChallenge(ctx context.Context, actor ChallengeActor, in EmailChallengeInput) (ChallengeView, error) {
+	if in.Purpose == "registration" && !s.opts.Registration.Enabled {
+		return ChallengeView{}, ErrForbidden
+	}
 	_, comparison, err := CanonicalEmail(in.Email)
 	if err != nil {
 		return ChallengeView{}, err
 	}
 	in.Email = comparison
-	if in.Purpose != "login" && in.Purpose != "password_reset" {
+	if in.Purpose != "login" && in.Purpose != "password_reset" && in.Purpose != "registration" {
 		return ChallengeView{}, &FieldError{Field: "purpose", Code: "InvalidFormat"}
 	}
-	return enrollmentCommand(s, ctx, actor, "beginEmailChallenge", "", in.CommandID, in, "Challenge", 200, noEnrollmentScope,
+	return enrollmentCommand(s, ctx, actor, "beginEmailChallenge", "", in.CommandID, in, "Challenge", 200, func(a domain.Aggregate, who enrollmentActor) error {
+		if in.Purpose == "registration" {
+			return s.registrationAccess(a, who)
+		}
+		return nil
+	},
 		func(a *domain.Aggregate, who enrollmentActor) (enrollmentChange[ChallengeView], error) {
 			for _, u := range a.Users {
 				if u.Email != "" && domain.ComparisonEmail(u.Email) == comparison {
 					return s.newChallenge(a, who, in.Purpose, u.Email, "", u)
 				}
+			}
+			if in.Purpose == "registration" {
+				return s.newChallenge(a, who, in.Purpose, in.Email, "", domain.User{})
 			}
 			return enrollmentChange[ChallengeView]{}, ErrChallengeUnavailable
 		})
@@ -379,7 +405,7 @@ func (s *Accounts) VerifyChallenge(ctx context.Context, actor ChallengeActor, in
 				return enrollmentChange[VerifiedChallenge]{}, ErrAuthUnavailable
 			}
 			digest := s.opts.Challenges.Digest(codeScope(c.ChallengeID, c.Purpose), in.Code)
-			if len(digest) != 64 || subtle.ConstantTimeCompare([]byte(digest), []byte(c.CodeDigest)) != 1 {
+			if len(digest) != 64 || subtle.ConstantTimeCompare([]byte(digest), []byte(c.CodeDigest)) != 1 || c.RegistrationSuppressed {
 				c.WrongAttempts++
 				err := ErrChallengeInvalidCode
 				if c.WrongAttempts == 5 {
@@ -409,6 +435,9 @@ func (s *Accounts) VerifyChallenge(ctx context.Context, actor ChallengeActor, in
 		})
 }
 func challengeEmail(a domain.Aggregate, c domain.Challenge, now time.Time) (string, error) {
+	if c.Purpose == "registration" {
+		return c.RegistrationEmail, nil
+	}
 	if c.InvitationID != "" {
 		i, err := invitationIndex(a, c.InvitationID)
 		if err != nil {
@@ -593,6 +622,12 @@ func (s *Accounts) acceptMembership(a *domain.Aggregate, u domain.User, v domain
 	return m, nil
 }
 func (s *Accounts) CompleteEmailChallenge(ctx context.Context, actor ChallengeActor, in EmailCompleteInput) (SessionView, error) {
+	if in.Purpose == "registration" {
+		return s.completeRegistration(ctx, actor, in)
+	}
+	if in.DisplayName != "" || in.Password != "" {
+		return SessionView{}, &FieldError{Field: "purpose", Code: "InvalidFormat"}
+	}
 	if in.Purpose != "login" && in.Purpose != "password_reset" || in.Purpose == "login" && in.NewPassword != "" || in.Purpose == "password_reset" && (in.RememberMe || in.NewPassword == "") {
 		return SessionView{}, &FieldError{Field: "purpose", Code: "InvalidFormat"}
 	}

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add opt-in public registration through existing email challenges, neutral occupied-address responses, atomic account/session completion and schema-v3 forward migration. Preserve challenge limits, replay results and password login.
+
 - Restore Gateway SSE access checks for the existing `live` operation without adding a bearer-token policy or changing session activity. Retain current scope, role, revocation and runtime checks.
 
 - Add FIN1 supply authorization through existing stock.read and replace the recommendation token's menu-evaluation grant with narrow consumer.recommendations.read. Preserve the dual-service audience, role checks and restaurant boundaries. Consumers must use the composed FIN1 profile.

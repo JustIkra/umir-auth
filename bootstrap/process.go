@@ -21,6 +21,7 @@ type clock struct{ location *time.Location }
 func (c clock) Now() time.Time { return time.Now().In(c.location) }
 
 type config struct {
+	Registration     application.RegistrationOptions   `json:"registration"`
 	PrivateAddress   string                            `json:"privateAddress"`
 	StateFile        string                            `json:"stateFile"`
 	SecretsDir       string                            `json:"secretsDir"`
@@ -95,6 +96,7 @@ func Run(ctx context.Context, path string) (err error) {
 		return e
 	}
 	o := Options{StateFile: cfg.StateFile, SecretsDir: cfg.SecretsDir, Initial: cfg.Initial, Password: string(password), Clock: clock{location: location}, TimeZones: zones, Runtimes: peers, ServiceKeys: keys}
+	o.Registration = cfg.Registration
 	o.InvitationMail = cfg.InvitationMail
 	stage = "authority bootstrap"
 	runtime, e := Open(ctx, o)

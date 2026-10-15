@@ -52,7 +52,7 @@ func (s *Accounts) enqueueChallenge(a *domain.Aggregate, c domain.Challenge, ema
 		return "", ErrAuthUnavailable
 	}
 	j := domain.MailJob{JobID: id, ChallengeID: c.ChallengeID, InvitationID: c.InvitationID, State: "queued", EncryptedPayload: sealed, AcceptedAt: formatInstant(s.opts.Clock.Now()), NextAttemptAt: formatInstant(s.opts.Clock.Now())}
-	if a.SchemaVersion == 2 {
+	if a.SchemaVersion >= 2 {
 		j.Purpose = "otp"
 		j.EnqueueOrder = "1"
 		if len(a.MailJobs) > 0 {
@@ -68,6 +68,11 @@ func (s *Accounts) enqueueChallenge(a *domain.Aggregate, c domain.Challenge, ema
 			return "", err
 		}
 		j.OrgID = a.Invitations[i].OrgID
+	}
+	if c.RegistrationSuppressed {
+		j.State = "suppressed"
+		j.EncryptedPayload = ""
+		j.NextAttemptAt = ""
 	}
 	a.MailJobs = append(a.MailJobs, j)
 	return id, nil
@@ -271,6 +276,8 @@ func validateEnrollmentSecrets(a domain.Aggregate, secrets ChallengeSecrets, lin
 				return err
 			}
 			expected = a.Invitations[ii].ComparisonEmail
+		} else if c.Purpose == "registration" {
+			expected = domain.ComparisonEmail(c.RegistrationEmail)
 		} else {
 			u, ok := findUser(a, c.UserID)
 			if !ok {
