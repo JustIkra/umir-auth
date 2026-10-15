@@ -48,22 +48,37 @@ type DurableResult struct {
 func (s *Accounts) RestaurantAccess(ctx context.Context, token string, restaurantID domain.EntityID) (domain.RestaurantAccess, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	a, err := s.load(ctx)
-	if err != nil {
-		return domain.RestaurantAccess{}, err
+	for {
+		if err := ctx.Err(); err != nil {
+			return domain.RestaurantAccess{}, err
+		}
+		a, err := s.load(ctx)
+		if err != nil {
+			return domain.RestaurantAccess{}, err
+		}
+		u, _, err := active(a, token, s.opts.Clock.Now())
+		if err != nil {
+			return domain.RestaurantAccess{}, err
+		}
+		if _, err := domain.RestaurantPermissions(a, u.UserID, restaurantID); err != nil {
+			return domain.RestaurantAccess{}, ErrForbidden
+		}
+		if _, err := s.runtimeAccess(ctx, a, restaurantID); err != nil {
+			if errors.Is(err, ErrRevisionConflict) {
+				continue
+			}
+			return domain.RestaurantAccess{}, err
+		}
+		u, _, err = active(a, token, s.opts.Clock.Now())
+		if err != nil {
+			return domain.RestaurantAccess{}, err
+		}
+		result, err := domain.RestaurantPermissions(a, u.UserID, restaurantID)
+		if err != nil {
+			return domain.RestaurantAccess{}, ErrForbidden
+		}
+		return result, nil
 	}
-	u, _, err := active(a, token, s.opts.Clock.Now())
-	if err != nil {
-		return domain.RestaurantAccess{}, err
-	}
-	result, err := domain.RestaurantPermissions(a, u.UserID, restaurantID)
-	if err != nil {
-		return domain.RestaurantAccess{}, ErrForbidden
-	}
-	if err := s.runtimeAccess(ctx, a, restaurantID); err != nil {
-		return domain.RestaurantAccess{}, err
-	}
-	return result, nil
 }
 func (s *Accounts) Memberships(ctx context.Context, token string, orgID domain.EntityID) ([]domain.Membership, error) {
 	s.mu.Lock()

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Move peer status IO outside the Auth mutex and revalidate authority revisions, sessions and registration settings before using observations. Preserve admission cutoff during concurrent logout, expiry and scope deletion.
+- Recover interrupted mail attempts without restarting Auth, retaining durable unknown/retry identities. Keep authority failures fail-closed and stop reconciliation on storage errors.
+- Resolve the short Unix-socket test root portably on Darwin and Linux without weakening socket or malformed-response checks.
+
 - Add pinned Auth CI with complete Go quality/race gates, dependency checks and a real production-image startup/readiness smoke. Registry publication remains separate.
 - Isolate password-login cooldowns by exact Login, bound retained counters to 4096 without evicting live attempts, and recheck cooldown after verification. Preserve the global verification queue limits.
 - Read one optional LF/CRLF from text password and SMTP credential files. Preserve spaces, raw key bytes and private-file admission. Report safe startup stages while retaining wrapped diagnostic causes.

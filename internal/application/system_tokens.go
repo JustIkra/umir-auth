@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/JustIkra/umir-auth/internal/domain"
@@ -33,33 +34,42 @@ func (s *Accounts) ServiceToken(ctx context.Context, caller, service string, id,
 	if !runtimeID.MatchString(string(epoch)) {
 		return IssuedToken{}, ErrForbidden
 	}
-	a, e := s.load(ctx)
-	if e != nil {
-		return IssuedToken{}, e
-	}
-	r, ok := findRestaurant(a, id)
-	if !ok {
-		return IssuedToken{}, ErrForbidden
-	}
-	party, subject := "umir-auth", "service:auth"
-	switch {
-	case caller == "gateway" && service == "warehouse" && operation == "expiry.due":
-		if e = s.runtimeAccess(ctx, a, id); e != nil {
+	for {
+		if err := ctx.Err(); err != nil {
+			return IssuedToken{}, err
+		}
+		a, e := s.load(ctx)
+		if e != nil {
 			return IssuedToken{}, e
 		}
-		party, subject = "umir-gateway", "service:gateway"
-		st, ok := s.runtimeStatus(ctx, service)
-		if !ok || st.Epoch != epoch {
-			return IssuedToken{}, ErrRuntimeNotReady
-		}
-	case caller == "auth" && (service == "warehouse" || service == "serving" || service == "gateway") && (operation == "runtime.register" || operation == "runtime.close"):
-		if operation == "runtime.close" && r.Lifecycle != "deleting" && r.Lifecycle != "deleted" || operation == "runtime.register" && (r.Lifecycle == "deleted" || r.Lifecycle == "deleting") {
+		r, ok := findRestaurant(a, id)
+		if !ok {
 			return IssuedToken{}, ErrForbidden
 		}
-	default:
-		return IssuedToken{}, ErrForbidden
+		party, subject := "umir-auth", "service:auth"
+		switch {
+		case caller == "gateway" && service == "warehouse" && operation == "expiry.due":
+			statuses, err := s.runtimeAccess(ctx, a, id)
+			if errors.Is(err, ErrRevisionConflict) {
+				continue
+			}
+			if err != nil {
+				return IssuedToken{}, err
+			}
+			party, subject = "umir-gateway", "service:gateway"
+			st, ok := statuses[service]
+			if !ok || st.Epoch != epoch {
+				return IssuedToken{}, ErrRuntimeNotReady
+			}
+		case caller == "auth" && (service == "warehouse" || service == "serving" || service == "gateway") && (operation == "runtime.register" || operation == "runtime.close"):
+			if operation == "runtime.close" && r.Lifecycle != "deleting" && r.Lifecycle != "deleted" || operation == "runtime.register" && (r.Lifecycle == "deleted" || r.Lifecycle == "deleting") {
+				return IssuedToken{}, ErrForbidden
+			}
+		default:
+			return IssuedToken{}, ErrForbidden
+		}
+		return issuer.SignService(ctx, ServiceDecision{Subject: subject, OrgID: r.OrgID, TenantID: id, RuntimeEpoch: epoch, LifecycleVersion: r.LifecycleVersion, AuthorizedParty: party, Operation: operation, Audiences: []string{"umir-" + service}, Permissions: []string{operation}}, s.opts.Clock.Now())
 	}
-	return issuer.SignService(ctx, ServiceDecision{Subject: subject, OrgID: r.OrgID, TenantID: id, RuntimeEpoch: epoch, LifecycleVersion: r.LifecycleVersion, AuthorizedParty: party, Operation: operation, Audiences: []string{"umir-" + service}, Permissions: []string{operation}}, s.opts.Clock.Now())
 }
 func (s *Accounts) AnonymousToken(ctx context.Context) (IssuedToken, error) {
 	s.mu.Lock()

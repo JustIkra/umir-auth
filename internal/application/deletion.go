@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 
 	"github.com/JustIkra/umir-auth/internal/domain"
@@ -158,65 +159,81 @@ func (s *Accounts) organizationDeletion(a domain.Aggregate, l domain.LifecycleIn
 func (s *Accounts) Lifecycle(ctx context.Context, token string, org, operation domain.EntityID) (LifecycleResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	a, err := s.load(ctx)
-	if err != nil {
-		return LifecycleResult{}, err
-	}
-	u, _, err := active(a, token, s.opts.Clock.Now())
-	if err != nil {
-		return LifecycleResult{}, err
-	}
-	for _, l := range a.LifecycleIntents {
-		if l.OperationID != operation || l.OrgID != org {
-			continue
-		}
-		deleting := l.Cleanup != "not_required"
-		if !domain.IsOrgAdmin(a, u.UserID, org) && (!deleting || l.ActorID != u.UserID) {
-			return LifecycleResult{}, ErrForbidden
-		}
-		if !deleting {
-			for _, id := range l.RestaurantIDs {
-				r, ok := findRestaurant(a, id)
-				if !ok || r.Lifecycle == "deleting" || r.Lifecycle == "deleted" {
-					return LifecycleResult{}, ErrForbidden
-				}
-			}
-		}
-		observed := s.observedLifecycle(ctx, l)
-		organization, err := s.organizationDeletion(a, l)
-		if err != nil {
-			return LifecycleResult{}, err
-		}
-		if deleting && organization {
-			for _, o := range a.Organizations {
-				if o.OrgID != org || o.Lifecycle == "active" {
-					continue
-				}
-				for _, r := range a.Restaurants {
-					if r.OrgID != org {
-						continue
-					}
-					li := latestIntent(a, r)
-					closed := r.Lifecycle == "deleted" && li >= 0
-					if closed {
-						prior := s.observedLifecycle(ctx, a.LifecycleIntents[li])
-						for _, p := range prior.Services {
-							if p.RestaurantID == r.RestaurantID && p.State != "closed" {
-								closed = false
-							}
-						}
-					}
-					if !closed {
-						observed.Lifecycle = "deleting"
-						observed.Cleanup = "pending"
-					}
-				}
-			}
-		}
+retry:
+	for {
 		if err := ctx.Err(); err != nil {
 			return LifecycleResult{}, err
 		}
-		return lifecycleView(observed), nil
+		a, err := s.load(ctx)
+		if err != nil {
+			return LifecycleResult{}, err
+		}
+		u, _, err := active(a, token, s.opts.Clock.Now())
+		if err != nil {
+			return LifecycleResult{}, err
+		}
+		for _, l := range a.LifecycleIntents {
+			if l.OperationID != operation || l.OrgID != org {
+				continue
+			}
+			deleting := l.Cleanup != "not_required"
+			if !domain.IsOrgAdmin(a, u.UserID, org) && (!deleting || l.ActorID != u.UserID) {
+				return LifecycleResult{}, ErrForbidden
+			}
+			if !deleting {
+				for _, id := range l.RestaurantIDs {
+					r, ok := findRestaurant(a, id)
+					if !ok || r.Lifecycle == "deleting" || r.Lifecycle == "deleted" {
+						return LifecycleResult{}, ErrForbidden
+					}
+				}
+			}
+			statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision)
+			if errors.Is(err, ErrRevisionConflict) {
+				continue retry
+			}
+			if err != nil {
+				return LifecycleResult{}, err
+			}
+			if _, _, err := active(a, token, s.opts.Clock.Now()); err != nil {
+				return LifecycleResult{}, err
+			}
+			observed := observedLifecycle(l, statuses)
+			organization, err := s.organizationDeletion(a, l)
+			if err != nil {
+				return LifecycleResult{}, err
+			}
+			if deleting && organization {
+				for _, o := range a.Organizations {
+					if o.OrgID != org || o.Lifecycle == "active" {
+						continue
+					}
+					for _, r := range a.Restaurants {
+						if r.OrgID != org {
+							continue
+						}
+						li := latestIntent(a, r)
+						closed := r.Lifecycle == "deleted" && li >= 0
+						if closed {
+							prior := observedLifecycle(a.LifecycleIntents[li], statuses)
+							for _, p := range prior.Services {
+								if p.RestaurantID == r.RestaurantID && p.State != "closed" {
+									closed = false
+								}
+							}
+						}
+						if !closed {
+							observed.Lifecycle = "deleting"
+							observed.Cleanup = "pending"
+						}
+					}
+				}
+			}
+			if err := ctx.Err(); err != nil {
+				return LifecycleResult{}, err
+			}
+			return lifecycleView(observed), nil
+		}
+		return LifecycleResult{}, ErrForbidden
 	}
-	return LifecycleResult{}, ErrForbidden
 }

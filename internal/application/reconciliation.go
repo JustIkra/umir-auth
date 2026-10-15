@@ -49,6 +49,30 @@ func (s *Accounts) runtimeStatus(ctx context.Context, service string) (RuntimeSt
 	st, err := s.opts.Runtimes.Status(attempt, service)
 	return st, err == nil && st.Service == service && runtimeID.MatchString(string(st.Epoch)) && st.TZDataVersion != ""
 }
+
+// The caller holds mu. Return with it held after observing peers without it.
+func (s *Accounts) observeRuntimeStatuses(ctx context.Context, revision domain.Version) (map[string]RuntimeStatus, error) {
+	s.mu.Unlock()
+	statuses := map[string]RuntimeStatus{}
+	for _, service := range runtimeServices {
+		if st, ok := s.runtimeStatus(ctx, service); ok {
+			statuses[service] = st
+		}
+	}
+	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	current, err := s.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if current.AggregateRevision != revision {
+		return nil, ErrRevisionConflict
+	}
+	return statuses, nil
+}
+
 func latestIntent(a domain.Aggregate, r domain.Restaurant) int {
 	for i := len(a.LifecycleIntents) - 1; i >= 0; i-- {
 		l := a.LifecycleIntents[i]
@@ -58,20 +82,24 @@ func latestIntent(a domain.Aggregate, r domain.Restaurant) int {
 	}
 	return -1
 }
-func (s *Accounts) runtimeAccess(ctx context.Context, a domain.Aggregate, id domain.EntityID) error {
+func (s *Accounts) runtimeAccess(ctx context.Context, a domain.Aggregate, id domain.EntityID) (map[string]RuntimeStatus, error) {
 	r, ok := findRestaurant(a, id)
 	if !ok || r.Lifecycle != "ready" {
-		return ErrRuntimeNotReady
+		return nil, ErrRuntimeNotReady
 	}
 	i := latestIntent(a, r)
 	if s.opts.Runtimes == nil || i < 0 {
-		return ErrRuntimeNotReady
+		return nil, ErrRuntimeNotReady
 	}
 	l := a.LifecycleIntents[i]
+	statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision)
+	if err != nil {
+		return nil, err
+	}
 	for _, service := range runtimeServices {
-		st, ok := s.runtimeStatus(ctx, service)
+		st, ok := statuses[service]
 		if !ok || !st.Ready {
-			return ErrRuntimeNotReady
+			return nil, ErrRuntimeNotReady
 		}
 		found := false
 		for _, p := range l.Services {
@@ -81,16 +109,17 @@ func (s *Accounts) runtimeAccess(ctx context.Context, a domain.Aggregate, id dom
 			}
 		}
 		if !found {
-			return ErrRuntimeNotReady
+			return nil, ErrRuntimeNotReady
 		}
 	}
-	return nil
+	return statuses, nil
 }
-func (s *Accounts) observedLifecycle(ctx context.Context, l domain.LifecycleIntent) domain.LifecycleIntent {
+func observedLifecycle(l domain.LifecycleIntent, statuses map[string]RuntimeStatus) domain.LifecycleIntent {
+	l.Services = slices.Clone(l.Services)
 	complete := true
 	for i := range l.Services {
 		p := &l.Services[i]
-		st, ok := s.runtimeStatus(ctx, p.Service)
+		st, ok := statuses[p.Service]
 		if !ok {
 			p.State = "pending"
 			p.Epoch = ""
@@ -159,7 +188,7 @@ func (s *Accounts) Reconcile(ctx context.Context) (bool, error) {
 			if already {
 				continue
 			}
-			if err := s.recordReadiness(ctx, l.OperationID, pending); err != nil {
+			if err := s.recordReadiness(ctx, l.OperationID, pending, nil); err != nil {
 				return false, err
 			}
 			if !known {
@@ -191,7 +220,7 @@ func (s *Accounts) Reconcile(ctx context.Context) (bool, error) {
 				complete = false
 				continue
 			}
-			if err := s.recordReadiness(ctx, l.OperationID, ack); err != nil {
+			if err := s.recordReadiness(ctx, l.OperationID, ack, &settings); err != nil {
 				return false, err
 			}
 		}
@@ -288,7 +317,7 @@ func (s *Accounts) prepareReconciliation(ctx context.Context) error {
 		return nil
 	}
 }
-func (s *Accounts) recordReadiness(ctx context.Context, operation domain.EntityID, peer domain.PeerReadiness) error {
+func (s *Accounts) recordReadiness(ctx context.Context, operation domain.EntityID, peer domain.PeerReadiness, settings *domain.Settings) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for {
@@ -303,6 +332,18 @@ func (s *Accounts) recordReadiness(ctx context.Context, operation domain.EntityI
 		i := latestIntent(a, r)
 		if !ok || i < 0 || a.LifecycleIntents[i].OperationID != operation || r.LifecycleVersion != peer.LifecycleVersion {
 			return nil
+		}
+		if settings != nil {
+			current := false
+			for _, org := range a.Organizations {
+				if org.OrgID == r.OrgID && org.Settings == *settings {
+					current = true
+					break
+				}
+			}
+			if !current {
+				return nil
+			}
 		}
 		l := &a.LifecycleIntents[i]
 		for j := range l.Services {
@@ -349,13 +390,11 @@ func (s *Accounts) finishReconciliation(ctx context.Context) error {
 			return err
 		}
 		changed := false
-		statuses := map[string]RuntimeStatus{}
-		for _, service := range runtimeServices {
-			if st, ok := s.runtimeStatus(ctx, service); ok {
-				statuses[service] = st
-			}
+		statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision)
+		if errors.Is(err, ErrRevisionConflict) {
+			continue
 		}
-		if err := ctx.Err(); err != nil {
+		if err != nil {
 			return err
 		}
 		for i := range a.Restaurants {
@@ -522,6 +561,9 @@ func (s *Accounts) RunReconciliation(ctx context.Context, waiter ReconciliationW
 		complete, err := s.Reconcile(ctx)
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if err != nil && !errors.Is(err, ErrRuntimeNotReady) {
+			return err
 		}
 		delay := time.Second
 		if err != nil || !complete {

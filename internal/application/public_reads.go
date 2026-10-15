@@ -125,7 +125,7 @@ func (s *Accounts) Acknowledge(ctx context.Context, service string, peer domain.
 	if peer.State != want || peer.State == "ready" && !status.Ready {
 		return domain.PeerReadiness{}, ErrForbidden
 	}
-	if e = s.recordReadiness(ctx, op, peer); e != nil {
+	if e = s.recordReadiness(ctx, op, peer, nil); e != nil {
 		return domain.PeerReadiness{}, e
 	}
 	return peer, nil

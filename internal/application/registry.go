@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 
 	"github.com/JustIkra/umir-auth/internal/domain"
 )
@@ -26,69 +27,69 @@ type RegistryResult struct {
 func (s *Accounts) Registry(ctx context.Context) (RegistryResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	a, err := s.load(ctx)
-	if err != nil {
-		return RegistryResult{}, err
-	}
-	if len(a.Restaurants) > 10000 {
-		return RegistryResult{}, ErrAuthUnavailable
-	}
-	result := RegistryResult{RegistryRevision: a.AggregateRevision, Complete: true, Entries: []RegistryEntry{}, Tombstones: []RegistryTombstone{}}
-	statuses := map[string]RuntimeStatus{}
-	for _, service := range runtimeServices {
-		if st, ok := s.runtimeStatus(ctx, service); ok {
-			statuses[service] = st
+	for {
+		a, err := s.load(ctx)
+		if err != nil {
+			return RegistryResult{}, err
 		}
-	}
-	if err := ctx.Err(); err != nil {
-		return RegistryResult{}, err
-	}
-	for _, r := range a.Restaurants {
-		if r.Lifecycle == "deleted" {
+		if len(a.Restaurants) > 10000 {
+			return RegistryResult{}, ErrAuthUnavailable
+		}
+		statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision)
+		if errors.Is(err, ErrRevisionConflict) {
 			continue
 		}
-		entry := RegistryEntry{Restaurant: r, Services: []domain.PeerReadiness{}}
-		for _, o := range a.Organizations {
-			if o.OrgID == r.OrgID {
-				entry.Settings = o.Settings
-				break
-			}
+		if err != nil {
+			return RegistryResult{}, err
 		}
-		index := latestIntent(a, r)
-		allReady := true
-		for _, service := range runtimeServices {
-			st, known := statuses[service]
-			if !known {
-				allReady = false
+		result := RegistryResult{RegistryRevision: a.AggregateRevision, Complete: true, Entries: []RegistryEntry{}, Tombstones: []RegistryTombstone{}}
+		for _, r := range a.Restaurants {
+			if r.Lifecycle == "deleted" {
 				continue
 			}
-			peer := domain.PeerReadiness{RestaurantID: r.RestaurantID, Service: service, Epoch: st.Epoch, State: "pending", LifecycleVersion: r.LifecycleVersion}
-			if index >= 0 {
-				for _, saved := range a.LifecycleIntents[index].Services {
-					if saved.RestaurantID == r.RestaurantID && saved.Service == service && saved.Epoch == st.Epoch {
-						peer = saved
-						break
-					}
+			entry := RegistryEntry{Restaurant: r, Services: []domain.PeerReadiness{}}
+			for _, o := range a.Organizations {
+				if o.OrgID == r.OrgID {
+					entry.Settings = o.Settings
+					break
 				}
 			}
-			if peer.State == "ready" && !st.Ready {
-				peer.State = "pending"
+			index := latestIntent(a, r)
+			allReady := true
+			for _, service := range runtimeServices {
+				st, known := statuses[service]
+				if !known {
+					allReady = false
+					continue
+				}
+				peer := domain.PeerReadiness{RestaurantID: r.RestaurantID, Service: service, Epoch: st.Epoch, State: "pending", LifecycleVersion: r.LifecycleVersion}
+				if index >= 0 {
+					for _, saved := range a.LifecycleIntents[index].Services {
+						if saved.RestaurantID == r.RestaurantID && saved.Service == service && saved.Epoch == st.Epoch {
+							peer = saved
+							break
+						}
+					}
+				}
+				if peer.State == "ready" && !st.Ready {
+					peer.State = "pending"
+				}
+				allReady = allReady && peer.State == "ready"
+				entry.Services = append(entry.Services, peer)
 			}
-			allReady = allReady && peer.State == "ready"
-			entry.Services = append(entry.Services, peer)
+			if entry.Restaurant.Lifecycle == "ready" && !allReady {
+				entry.Restaurant.Lifecycle = "registering"
+			}
+			result.Entries = append(result.Entries, entry)
 		}
-		if entry.Restaurant.Lifecycle == "ready" && !allReady {
-			entry.Restaurant.Lifecycle = "registering"
+		for _, t := range a.Tombstones {
+			if t.Kind == "restaurant" {
+				result.Tombstones = append(result.Tombstones, RegistryTombstone{RestaurantID: t.EntityID, OrgID: t.OrgID, LifecycleVersion: t.LifecycleVersion})
+			}
 		}
-		result.Entries = append(result.Entries, entry)
-	}
-	for _, t := range a.Tombstones {
-		if t.Kind == "restaurant" {
-			result.Tombstones = append(result.Tombstones, RegistryTombstone{RestaurantID: t.EntityID, OrgID: t.OrgID, LifecycleVersion: t.LifecycleVersion})
+		if len(result.Tombstones) > 10000 {
+			return RegistryResult{}, ErrAuthUnavailable
 		}
+		return result, nil
 	}
-	if len(result.Tombstones) > 10000 {
-		return RegistryResult{}, ErrAuthUnavailable
-	}
-	return result, nil
 }

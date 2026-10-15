@@ -71,12 +71,22 @@ func (r *Runtime) ServeWithMailProcessor(ctx context.Context, listener net.Liste
 			case <-timer.C:
 				attempt, stop := context.WithTimeout(work, 10*time.Second)
 				_, mailErr := processor.ProcessMail(attempt, r.Accounts, boundedMailSender{sender})
+				attemptErr := attempt.Err()
+				stop()
 				if mailErr != nil && work.Err() == nil {
+					interrupted := attemptErr != nil && (errors.Is(mailErr, context.DeadlineExceeded) || errors.Is(mailErr, context.Canceled))
+					if interrupted && !errors.Is(mailErr, application.ErrUpdateOutcomeUnknown) && !errors.Is(mailErr, application.ErrRecoveryRequired) {
+						recovery, cancel := context.WithTimeout(work, 5*time.Second)
+						recoveryErr := r.Accounts.RecoverMail(recovery)
+						cancel()
+						if recoveryErr == nil {
+							continue
+						}
+						mailErr = errors.Join(mailErr, recoveryErr)
+					}
 					r.failWorker(mailErr)
-					stop()
 					return
 				}
-				stop()
 			}
 		}
 	})

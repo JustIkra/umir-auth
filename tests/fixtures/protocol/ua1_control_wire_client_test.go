@@ -15,7 +15,11 @@ import (
 
 func TestUA1ControlWirePrivateUnixTransportAndMalformedReplies(t *testing.T) {
 	o, h, _ := ua1WireOwner(t)
-	dir, err := os.MkdirTemp("/private/tmp", "ua1-control-wire-")
+	root, err := filepath.EvalSymlinks("/tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(root, "ua1-control-wire-")
 	if err != nil {
 		t.Fatal(err)
 	}

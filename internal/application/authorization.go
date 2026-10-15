@@ -148,7 +148,7 @@ func (s *Accounts) AuthorizeToken(ctx context.Context, in AuthorizationInput) (A
 			return AuthorizationResult{}, err
 		}
 		now := s.opts.Clock.Now()
-		u, i, err := active(a, in.SessionToken, now)
+		u, _, err := active(a, in.SessionToken, now)
 		if err != nil {
 			return AuthorizationResult{}, err
 		}
@@ -156,7 +156,15 @@ func (s *Accounts) AuthorizeToken(ctx context.Context, in AuthorizationInput) (A
 		if err != nil || !slices.Contains(access.Permissions, policy.Capability) {
 			return AuthorizationResult{}, ErrForbidden
 		}
-		if err := s.runtimeAccess(ctx, a, in.RestaurantID); err != nil {
+		if _, err := s.runtimeAccess(ctx, a, in.RestaurantID); err != nil {
+			if errors.Is(err, ErrRevisionConflict) {
+				continue
+			}
+			return AuthorizationResult{}, err
+		}
+		now = s.opts.Clock.Now()
+		u, i, err := active(a, in.SessionToken, now)
+		if err != nil {
 			return AuthorizationResult{}, err
 		}
 		if err := s.validateZone(access.Settings.TimeZone); err != nil {
