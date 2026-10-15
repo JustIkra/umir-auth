@@ -75,7 +75,7 @@ func UserTokenPolicy(operation string) (TokenPolicy, bool) {
 		capability = "catalog.write"
 	case "receiveDelivery":
 		capability = "delivery.create"
-	case "inventory", "expiringBatches", "history", "pendingWriteoffs", "productBatches":
+	case "inventory", "expiringBatches", "history", "pendingWriteoffs", "productBatches", "supplySuggestions":
 		capability = "stock.read"
 	case "confirmWriteoff", "resolveWriteoffCommand":
 		capability = "writeoff.confirm"
@@ -89,7 +89,7 @@ func UserTokenPolicy(operation string) (TokenPolicy, bool) {
 		extra = []string{"consumer.menu.evaluate"}
 	case "recommendations":
 		capability = "recommendations.read"
-		extra = []string{"consumer.menu.evaluate"}
+		extra = []string{"consumer.recommendations.read"}
 	case "servingProducts", "servingDishes", "servingDish":
 		capability = "menu.read"
 		extra = []string{"catalog.read"}

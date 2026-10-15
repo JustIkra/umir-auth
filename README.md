@@ -4,6 +4,8 @@ Auth owns the durable identity aggregate. The module identity is `github.com/Jus
 
 The implementation consumes Factory contract `2.0.0-draft.2`, approved by C2 with content SHA-256 `733e102ff0b4f52bb49d435716f9f1720642c8fad3a8a5d0685847071950e9e6`. Storage field names inside records are private to Auth. The module is unreleased and has no selected assembly pin. Production and fixture images keep separate revision identities.
 
+The [FIN1 supplement](https://github.com/JustIkra/umir-factory/blob/5a3ab9cb7a2a48801f07024d5b5c205577211e75/docs/completion-api-amendment.md) adds operation `supplySuggestions`, authorized by the existing `stock.read` capability with only the Warehouse audience. The `recommendations` token keeps the Serving and Warehouse audiences and now contains exactly `recommendations.read` and `consumer.recommendations.read`. The narrow permission replaces the predecessor `consumer.menu.evaluate` grant for this operation. Menu and stop-list policies keep their existing menu permission. Role membership and restaurant scope do not change; Waiter alone cannot request supply suggestions or arbitrary stock/history reads. Deploy consumers of the composed FIN1 profile together. Original C2/UA1 schemas and evidence remain separate.
+
 ## Architecture
 
 Private Auth error responses preserve password cooldown revocation state. A

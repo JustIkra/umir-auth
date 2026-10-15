@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add FIN1 supply authorization through existing stock.read and replace the recommendation token's menu-evaluation grant with narrow consumer.recommendations.read. Preserve the dual-service audience, role checks and restaurant boundaries. Consumers must use the composed FIN1 profile.
+
 - Move peer status IO outside the Auth mutex and revalidate authority revisions, sessions and registration settings before using observations. Preserve admission cutoff during concurrent logout, expiry and scope deletion.
 - Recover interrupted mail attempts without restarting Auth, retaining durable unknown/retry identities. Keep authority failures fail-closed and stop reconciliation on storage errors.
 - Resolve the short Unix-socket test root portably on Darwin and Linux without weakening socket or malformed-response checks.

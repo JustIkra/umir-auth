@@ -348,7 +348,7 @@ func TestA5ConcurrentSettingsAcrossIndependentConsumers(t *testing.T) {
 		t.Fatal("expected version lost across independent consumers")
 	}
 }
-func TestA5FrozenBusinessTokenPolicyMatrix(t *testing.T) {
+func TestA5BusinessTokenPolicyMatrixWithFIN1Recommendations(t *testing.T) {
 	f, s := a5Setup(t)
 	j, e := s.JWKS(ctx)
 	if e != nil {
@@ -364,7 +364,7 @@ func TestA5FrozenBusinessTokenPolicyMatrix(t *testing.T) {
 		{"prepareOrder", []string{"umir-serving", "umir-warehouse"}, []string{"order.prepare", "consumer.order.evaluate"}},
 		{"confirmOrder", []string{"umir-serving", "umir-warehouse"}, []string{"order.confirm", "consumer.order.evaluate", "consumer.order.commit", "consumer.order.resolve"}},
 		{"resolveOrder", []string{"umir-serving", "umir-warehouse"}, []string{"order.read", "consumer.order.resolve"}},
-		{"recommendations", []string{"umir-serving", "umir-warehouse"}, []string{"recommendations.read", "consumer.menu.evaluate"}},
+		{"recommendations", []string{"umir-serving", "umir-warehouse"}, []string{"recommendations.read", "consumer.recommendations.read"}},
 		{"appFeedback", []string{"umir-feedback"}, []string{"feedback.submit"}},
 		{"publicFeedbackRead", []string{"umir-feedback"}, []string{"feedback.read"}},
 		{"publicFeedbackExport", []string{"umir-feedback"}, []string{"feedback.export"}},
@@ -377,7 +377,7 @@ func TestA5FrozenBusinessTokenPolicyMatrix(t *testing.T) {
 			}
 			c, e := jwt.VerifyUser(r.Token, j, f.opts.Clock.Now(), tc.audiences[0])
 			if e != nil || !reflect.DeepEqual(c.Permissions, tc.permissions) || !reflect.DeepEqual(c.Audiences, tc.audiences) {
-				t.Fatal("frozen target/permission pairing violated")
+				t.Fatal("current target/permission pairing violated")
 			}
 		})
 	}
