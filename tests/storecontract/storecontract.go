@@ -3,6 +3,8 @@ package storecontract
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/JustIkra/umir-auth/internal/application"
@@ -158,6 +160,37 @@ func Run[T application.Store](t *testing.T, newStore func() T) {
 		_, err := store.InTx(ctx, scope, func(tx application.Tx) error { return tx.Invitations().Insert(ctx, second) })
 		if !errors.Is(err, application.ErrEntityConflict) {
 			t.Fatalf("duplicate pending invite was accepted: %v", err)
+		}
+	})
+	t.Run("proof is consumed once under concurrency", func(t *testing.T) {
+		store := newStore()
+		ctx := context.Background()
+		scope := application.Scope{Actor: application.ActorSystem}
+		challenge := domain.Challenge{ChallengeID: "challenge-1", Purpose: "password_reset", ProofDigest: "proof-digest", EncryptedProof: "proof", ProofExpiresAt: "2026-10-17T00:00:00Z", ExpiresAt: "2026-10-17T00:00:00Z", ResendAvailableAt: "2026-10-16T00:00:00Z", State: "verified", IssueCount: 1}
+		if _, err := store.InTx(ctx, scope, func(tx application.Tx) error { return tx.Challenges().Insert(ctx, challenge) }); err != nil {
+			t.Fatal(err)
+		}
+		var winners atomic.Int32
+		var wg sync.WaitGroup
+		for i := 0; i < 16; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+					used, err := tx.Challenges().ConsumeProof(ctx, challenge.ChallengeID, "proof-digest")
+					if used {
+						winners.Add(1)
+					}
+					return err
+				})
+				if err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+		wg.Wait()
+		if winners.Load() != 1 {
+			t.Fatalf("proof consumption winners = %d, want 1", winners.Load())
 		}
 	})
 }

@@ -57,6 +57,7 @@ type Reader interface {
 	Restaurants() RestaurantReader
 	Memberships() MembershipReader
 	Invitations() InvitationReader
+	Challenges() ChallengeReader
 }
 
 type Tx interface {
@@ -67,6 +68,7 @@ type Tx interface {
 	Restaurants() RestaurantRepository
 	Memberships() MembershipRepository
 	Invitations() InvitationRepository
+	Challenges() ChallengeRepository
 }
 
 type UserReader interface {
@@ -136,4 +138,14 @@ type InvitationReader interface {
 type InvitationRepository interface {
 	InvitationReader
 	Insert(context.Context, domain.Invitation) error
+}
+
+type ChallengeReader interface {
+	Get(context.Context, domain.EntityID) (domain.Challenge, bool, error)
+}
+
+type ChallengeRepository interface {
+	ChallengeReader
+	Insert(context.Context, domain.Challenge) error
+	ConsumeProof(context.Context, domain.EntityID, string) (bool, error)
 }

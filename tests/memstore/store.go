@@ -19,11 +19,12 @@ type Store struct {
 	restaurants map[domain.EntityID]domain.Restaurant
 	memberships map[domain.EntityID]domain.Membership
 	invitations map[domain.EntityID]domain.Invitation
+	challenges  map[domain.EntityID]domain.Challenge
 	revision    domain.Version
 }
 
 func New() *Store {
-	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), invitations: make(map[domain.EntityID]domain.Invitation), revision: "1"}
+	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), invitations: make(map[domain.EntityID]domain.Invitation), challenges: make(map[domain.EntityID]domain.Challenge), revision: "1"}
 }
 
 func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(application.Tx) error) (application.CommitResult, error) {
@@ -43,7 +44,8 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	restaurants := cloneRestaurants(s.restaurants)
 	memberships := cloneMemberships(s.memberships)
 	invitations := cloneInvitations(s.invitations)
-	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations}
+	challenges := cloneChallenges(s.challenges)
+	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges}
 	if err := fn(tx); err != nil {
 		return application.CommitResult{Outcome: application.NotCommitted}, err
 	}
@@ -58,6 +60,7 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	s.restaurants = restaurants
 	s.memberships = memberships
 	s.invitations = invitations
+	s.challenges = challenges
 	return application.CommitResult{Outcome: application.Committed, AggregateRevision: s.revision}, nil
 }
 
@@ -70,7 +73,7 @@ func (s *Store) View(ctx context.Context, scope application.Scope, fn func(appli
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations})
+	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges})
 }
 
 type reader struct {
@@ -81,6 +84,7 @@ type reader struct {
 	restaurants map[domain.EntityID]domain.Restaurant
 	memberships map[domain.EntityID]domain.Membership
 	invitations map[domain.EntityID]domain.Invitation
+	challenges  map[domain.EntityID]domain.Challenge
 }
 
 func (r reader) Users() application.UserReader { return userReader{users: r.users} }
@@ -100,6 +104,9 @@ func (r reader) Memberships() application.MembershipReader {
 func (r reader) Invitations() application.InvitationReader {
 	return invitationReader{orgs: r.orgs, restaurants: r.restaurants, invitations: r.invitations}
 }
+func (r reader) Challenges() application.ChallengeReader {
+	return challengeReader{challenges: r.challenges}
+}
 
 type transaction struct {
 	users       map[domain.EntityID]domain.User
@@ -109,6 +116,7 @@ type transaction struct {
 	restaurants map[domain.EntityID]domain.Restaurant
 	memberships map[domain.EntityID]domain.Membership
 	invitations map[domain.EntityID]domain.Invitation
+	challenges  map[domain.EntityID]domain.Challenge
 }
 
 func (t transaction) Users() application.UserRepository {
@@ -133,6 +141,9 @@ func (t transaction) Memberships() application.MembershipRepository {
 }
 func (t transaction) Invitations() application.InvitationRepository {
 	return invitationRepository{invitationReader{orgs: t.orgs, restaurants: t.restaurants, invitations: t.invitations}}
+}
+func (t transaction) Challenges() application.ChallengeRepository {
+	return challengeRepository{challengeReader{challenges: t.challenges}}
 }
 
 type userReader struct {
@@ -550,6 +561,58 @@ func cloneInvitation(invitation domain.Invitation) domain.Invitation {
 		invitation.Assignments[i].Roles = append([]string(nil), invitation.Assignments[i].Roles...)
 	}
 	return invitation
+}
+
+type challengeReader struct {
+	challenges map[domain.EntityID]domain.Challenge
+}
+
+func (r challengeReader) Get(ctx context.Context, id domain.EntityID) (domain.Challenge, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Challenge{}, false, err
+	}
+	challenge, ok := r.challenges[id]
+	return cloneChallenge(challenge), ok, nil
+}
+
+type challengeRepository struct{ challengeReader }
+
+func (r challengeRepository) Insert(ctx context.Context, challenge domain.Challenge) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if challenge.ChallengeID == "" || r.challenges[challenge.ChallengeID].ChallengeID != "" {
+		return application.ErrEntityConflict
+	}
+	r.challenges[challenge.ChallengeID] = cloneChallenge(challenge)
+	return nil
+}
+
+func (r challengeRepository) ConsumeProof(ctx context.Context, id domain.EntityID, digest string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	challenge, ok := r.challenges[id]
+	if !ok || challenge.State != "verified" || challenge.ProofDigest != digest {
+		return false, nil
+	}
+	challenge.State = "completed"
+	challenge.EncryptedProof = ""
+	r.challenges[id] = challenge
+	return true, nil
+}
+
+func cloneChallenges(challenges map[domain.EntityID]domain.Challenge) map[domain.EntityID]domain.Challenge {
+	copyOf := make(map[domain.EntityID]domain.Challenge, len(challenges))
+	for id, challenge := range challenges {
+		copyOf[id] = cloneChallenge(challenge)
+	}
+	return copyOf
+}
+
+func cloneChallenge(challenge domain.Challenge) domain.Challenge {
+	challenge.WrongAttemptTimes = append([]domain.Instant(nil), challenge.WrongAttemptTimes...)
+	return challenge
 }
 
 var _ application.Store = (*Store)(nil)
