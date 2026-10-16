@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refuse login passwords over 32 code points or with invalid UTF-8 before the failure throttle, so they no longer fill its 4096 counters or start a cooldown. The response is still InvalidCredentials.
+
 - Drop the stateful preauth issuance table and its 1024-entry cap and mutex; preauth tokens stay self-contained (HMAC and time), and the per-client issue limit belongs to Gateway.
 
 - Stop cloning the whole aggregate for readiness and for idle mail-worker ticks: `ValidatedAggregate.Inspect` gives read-only access, and the sweep and the claim only copy the state when they have work. Session and command-result retention are unchanged.

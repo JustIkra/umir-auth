@@ -223,6 +223,12 @@ func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error
 		s.mu.Unlock()
 		return *replay, nil
 	}
+	if !utf8.ValidString(in.Password) || utf8.RuneCountInString(in.Password) > 32 {
+		// No password this long or malformed is ever stored, so the attempt costs no
+		// hashing: it creates and moves no throttle entry.
+		s.mu.Unlock()
+		return SessionView{}, ErrInvalidCredentials
+	}
 	var user domain.User
 	known := false
 	for _, u := range a.Users {
@@ -255,12 +261,6 @@ func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error
 		return SessionView{}, rateLimited(wait)
 	}
 	s.mu.Unlock()
-	if !utf8.ValidString(in.Password) || utf8.RuneCountInString(in.Password) > 32 {
-		s.mu.Lock()
-		th.fail(s.opts.Clock.Now(), 5, time.Minute, time.Minute)
-		s.mu.Unlock()
-		return SessionView{}, ErrInvalidCredentials
-	}
 	release, err := s.gate.acquire(ctx, true)
 	if err != nil {
 		return SessionView{}, err
