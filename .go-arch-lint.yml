@@ -18,6 +18,8 @@ vendors:
   x-crypto-argon2: {in: "golang.org/x/crypto/argon2"}
   fixture-schema: {in: "github.com/santhosh-tekuri/jsonschema/v6"}
   ecma-regexp: {in: "github.com/dlclark/regexp2"}
+  pgx: {in: ["github.com/jackc/pgx/v5", "github.com/jackc/pgx/v5/**"]}
+  amqp091: {in: "github.com/rabbitmq/amqp091-go"}
 deps:
   domain:
     mayDependOn: [domain]
@@ -28,7 +30,7 @@ deps:
     canUse: [x-text-norm]
   adapters:
     mayDependOn: [adapters, application, domain, contract]
-    canUse: [x-crypto-argon2, fixture-schema, ecma-regexp]
+    canUse: [x-crypto-argon2, fixture-schema, ecma-regexp, pgx, amqp091]
   bootstrap:
     mayDependOn: [bootstrap, application, adapters, domain, contract]
   process:
@@ -37,4 +39,4 @@ deps:
     mayDependOn: [testsupport, domain, contract]
   tests:
     mayDependOn: [tests, testsupport, application, adapters, domain, contract, bootstrap]
-    canUse: [fixture-schema, ecma-regexp]
+    canUse: [fixture-schema, ecma-regexp, pgx, amqp091]
