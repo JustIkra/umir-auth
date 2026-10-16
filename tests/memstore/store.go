@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"context"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,25 +13,26 @@ import (
 )
 
 type Store struct {
-	mu           sync.RWMutex
-	users        map[domain.EntityID]domain.User
-	sessions     map[domain.EntityID]domain.Session
-	commands     map[application.CommandKey]domain.IdempotencyRecord
-	orgs         map[domain.EntityID]domain.Organization
-	restaurants  map[domain.EntityID]domain.Restaurant
-	memberships  map[domain.EntityID]domain.Membership
-	invitations  map[domain.EntityID]domain.Invitation
-	challenges   map[domain.EntityID]domain.Challenge
-	mailJobs     map[domain.EntityID]domain.MailJob
-	budgetEvents []application.BudgetEvent
-	outbox       map[domain.EntityID]application.OutboxEvent
-	lifecycle    map[domain.EntityID]domain.LifecycleIntent
-	tombstones   map[domain.EntityID]domain.Tombstone
-	revision     domain.Version
+	mu               sync.RWMutex
+	users            map[domain.EntityID]domain.User
+	sessions         map[domain.EntityID]domain.Session
+	commands         map[application.CommandKey]domain.IdempotencyRecord
+	orgs             map[domain.EntityID]domain.Organization
+	restaurants      map[domain.EntityID]domain.Restaurant
+	memberships      map[domain.EntityID]domain.Membership
+	invitations      map[domain.EntityID]domain.Invitation
+	challenges       map[domain.EntityID]domain.Challenge
+	mailJobs         map[domain.EntityID]domain.MailJob
+	budgetEvents     []application.BudgetEvent
+	outbox           map[domain.EntityID]application.OutboxEvent
+	lifecycle        map[domain.EntityID]domain.LifecycleIntent
+	tombstones       map[domain.EntityID]domain.Tombstone
+	registryRevision domain.Version
+	revision         domain.Version
 }
 
 func New() *Store {
-	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), invitations: make(map[domain.EntityID]domain.Invitation), challenges: make(map[domain.EntityID]domain.Challenge), mailJobs: make(map[domain.EntityID]domain.MailJob), outbox: make(map[domain.EntityID]application.OutboxEvent), lifecycle: make(map[domain.EntityID]domain.LifecycleIntent), tombstones: make(map[domain.EntityID]domain.Tombstone), revision: "1"}
+	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), invitations: make(map[domain.EntityID]domain.Invitation), challenges: make(map[domain.EntityID]domain.Challenge), mailJobs: make(map[domain.EntityID]domain.MailJob), outbox: make(map[domain.EntityID]application.OutboxEvent), lifecycle: make(map[domain.EntityID]domain.LifecycleIntent), tombstones: make(map[domain.EntityID]domain.Tombstone), revision: "1", registryRevision: "1"}
 }
 
 func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(application.Tx) error) (application.CommitResult, error) {
@@ -56,7 +58,8 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	outbox := cloneOutbox(s.outbox)
 	lifecycle := cloneLifecycle(s.lifecycle)
 	tombstones := cloneTombstones(s.tombstones)
-	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges, mailJobs: mailJobs, budgetEvents: &budgetEvents, outbox: outbox, lifecycle: lifecycle, tombstones: tombstones}
+	registryRevision := s.registryRevision
+	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges, mailJobs: mailJobs, budgetEvents: &budgetEvents, outbox: outbox, lifecycle: lifecycle, tombstones: tombstones, registryRevision: &registryRevision}
 	if err := fn(tx); err != nil {
 		return application.CommitResult{Outcome: application.NotCommitted}, err
 	}
@@ -77,6 +80,7 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	s.outbox = outbox
 	s.lifecycle = lifecycle
 	s.tombstones = tombstones
+	s.registryRevision = registryRevision
 	return application.CommitResult{Outcome: application.Committed, AggregateRevision: s.revision}, nil
 }
 
@@ -89,23 +93,24 @@ func (s *Store) View(ctx context.Context, scope application.Scope, fn func(appli
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges, mailJobs: s.mailJobs, budgetEvents: s.budgetEvents, outbox: s.outbox, lifecycle: s.lifecycle, tombstones: s.tombstones})
+	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges, mailJobs: s.mailJobs, budgetEvents: s.budgetEvents, outbox: s.outbox, lifecycle: s.lifecycle, tombstones: s.tombstones, registryRevision: s.registryRevision})
 }
 
 type reader struct {
-	users        map[domain.EntityID]domain.User
-	sessions     map[domain.EntityID]domain.Session
-	commands     map[application.CommandKey]domain.IdempotencyRecord
-	orgs         map[domain.EntityID]domain.Organization
-	restaurants  map[domain.EntityID]domain.Restaurant
-	memberships  map[domain.EntityID]domain.Membership
-	invitations  map[domain.EntityID]domain.Invitation
-	challenges   map[domain.EntityID]domain.Challenge
-	mailJobs     map[domain.EntityID]domain.MailJob
-	budgetEvents []application.BudgetEvent
-	outbox       map[domain.EntityID]application.OutboxEvent
-	lifecycle    map[domain.EntityID]domain.LifecycleIntent
-	tombstones   map[domain.EntityID]domain.Tombstone
+	users            map[domain.EntityID]domain.User
+	sessions         map[domain.EntityID]domain.Session
+	commands         map[application.CommandKey]domain.IdempotencyRecord
+	orgs             map[domain.EntityID]domain.Organization
+	restaurants      map[domain.EntityID]domain.Restaurant
+	memberships      map[domain.EntityID]domain.Membership
+	invitations      map[domain.EntityID]domain.Invitation
+	challenges       map[domain.EntityID]domain.Challenge
+	mailJobs         map[domain.EntityID]domain.MailJob
+	budgetEvents     []application.BudgetEvent
+	outbox           map[domain.EntityID]application.OutboxEvent
+	lifecycle        map[domain.EntityID]domain.LifecycleIntent
+	tombstones       map[domain.EntityID]domain.Tombstone
+	registryRevision domain.Version
 }
 
 func (r reader) Users() application.UserReader { return userReader{users: r.users} }
@@ -134,21 +139,25 @@ func (r reader) Outbox() application.OutboxReader    { return outboxRepository{e
 func (r reader) Lifecycle() application.LifecycleReader {
 	return lifecycleRepository{restaurants: r.restaurants, orgs: r.orgs, lifecycle: r.lifecycle, tombstones: r.tombstones}
 }
+func (r reader) Registry() application.RegistryReader {
+	return registryRepository{restaurants: r.restaurants, orgs: r.orgs, revision: r.registryRevision}
+}
 
 type transaction struct {
-	users        map[domain.EntityID]domain.User
-	sessions     map[domain.EntityID]domain.Session
-	commands     map[application.CommandKey]domain.IdempotencyRecord
-	orgs         map[domain.EntityID]domain.Organization
-	restaurants  map[domain.EntityID]domain.Restaurant
-	memberships  map[domain.EntityID]domain.Membership
-	invitations  map[domain.EntityID]domain.Invitation
-	challenges   map[domain.EntityID]domain.Challenge
-	mailJobs     map[domain.EntityID]domain.MailJob
-	budgetEvents *[]application.BudgetEvent
-	outbox       map[domain.EntityID]application.OutboxEvent
-	lifecycle    map[domain.EntityID]domain.LifecycleIntent
-	tombstones   map[domain.EntityID]domain.Tombstone
+	users            map[domain.EntityID]domain.User
+	sessions         map[domain.EntityID]domain.Session
+	commands         map[application.CommandKey]domain.IdempotencyRecord
+	orgs             map[domain.EntityID]domain.Organization
+	restaurants      map[domain.EntityID]domain.Restaurant
+	memberships      map[domain.EntityID]domain.Membership
+	invitations      map[domain.EntityID]domain.Invitation
+	challenges       map[domain.EntityID]domain.Challenge
+	mailJobs         map[domain.EntityID]domain.MailJob
+	budgetEvents     *[]application.BudgetEvent
+	outbox           map[domain.EntityID]application.OutboxEvent
+	lifecycle        map[domain.EntityID]domain.LifecycleIntent
+	tombstones       map[domain.EntityID]domain.Tombstone
+	registryRevision *domain.Version
 }
 
 func (t transaction) Users() application.UserRepository {
@@ -186,6 +195,9 @@ func (t transaction) Budgets() application.BudgetRepository {
 func (t transaction) Outbox() application.OutboxRepository { return outboxRepository{events: t.outbox} }
 func (t transaction) Lifecycle() application.LifecycleRepository {
 	return lifecycleRepository{restaurants: t.restaurants, orgs: t.orgs, lifecycle: t.lifecycle, tombstones: t.tombstones}
+}
+func (t transaction) Registry() application.RegistryRepository {
+	return registryRepository{restaurants: t.restaurants, orgs: t.orgs, revision: *t.registryRevision, writable: t.registryRevision}
 }
 
 type userReader struct {
@@ -796,6 +808,68 @@ type lifecycleRepository struct {
 	orgs        map[domain.EntityID]domain.Organization
 	lifecycle   map[domain.EntityID]domain.LifecycleIntent
 	tombstones  map[domain.EntityID]domain.Tombstone
+}
+
+type registryRepository struct {
+	restaurants map[domain.EntityID]domain.Restaurant
+	orgs        map[domain.EntityID]domain.Organization
+	revision    domain.Version
+	writable    *domain.Version
+}
+
+func (r registryRepository) Revision(ctx context.Context) (domain.Version, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return r.revision, nil
+}
+
+func (r registryRepository) Touch(ctx context.Context) (domain.Version, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if r.writable == nil {
+		return "", application.ErrInvalidScope
+	}
+	n, ok := domain.VersionNumber(*r.writable)
+	if !ok || n == int64(^uint64(0)>>1) {
+		return "", application.ErrStorageUnavailable
+	}
+	*r.writable = domain.Version(strconv.FormatInt(n+1, 10))
+	return *r.writable, nil
+}
+
+func (r registryRepository) Page(ctx context.Context, limit int, after string) (application.RegistryPage, error) {
+	if err := ctx.Err(); err != nil {
+		return application.RegistryPage{}, err
+	}
+	if limit < 1 || limit > 1000 {
+		return application.RegistryPage{}, application.ErrInvalidScope
+	}
+	ids := make([]domain.EntityID, 0, len(r.restaurants))
+	for id, restaurant := range r.restaurants {
+		if id > domain.EntityID(after) && restaurant.Lifecycle != "deleted" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	complete := len(ids) <= limit
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	page := application.RegistryPage{Revision: r.revision, Complete: complete, Entries: make([]application.RegistryEntry, 0, len(ids))}
+	for _, id := range ids {
+		restaurant := r.restaurants[id]
+		entry := application.RegistryEntry{Restaurant: restaurant, Services: []domain.PeerReadiness{}}
+		if org, ok := r.orgs[restaurant.OrgID]; ok {
+			entry.Settings = org.Settings
+		}
+		page.Entries = append(page.Entries, entry)
+	}
+	if !complete && len(ids) > 0 {
+		page.NextAfter = string(ids[len(ids)-1])
+	}
+	return page, nil
 }
 
 func (r lifecycleRepository) Intent(ctx context.Context, operationID domain.EntityID) (domain.LifecycleIntent, bool, error) {

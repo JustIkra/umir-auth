@@ -68,6 +68,7 @@ type Reader interface {
 	Budgets() BudgetReader
 	Outbox() OutboxReader
 	Lifecycle() LifecycleReader
+	Registry() RegistryReader
 }
 
 type Tx interface {
@@ -83,6 +84,7 @@ type Tx interface {
 	Budgets() BudgetRepository
 	Outbox() OutboxRepository
 	Lifecycle() LifecycleRepository
+	Registry() RegistryRepository
 }
 
 type UserReader interface {
@@ -219,6 +221,23 @@ type LifecycleRepository interface {
 	LifecycleReader
 	InsertIntent(context.Context, domain.LifecycleIntent) error
 	InsertTombstone(context.Context, domain.Tombstone) error
+}
+
+type RegistryPage struct {
+	Revision  domain.Version
+	Complete  bool
+	NextAfter string
+	Entries   []RegistryEntry
+}
+
+type RegistryReader interface {
+	Revision(context.Context) (domain.Version, error)
+	Page(context.Context, int, string) (RegistryPage, error)
+}
+
+type RegistryRepository interface {
+	RegistryReader
+	Touch(context.Context) (domain.Version, error)
 }
 
 func (event OutboxEvent) Validate() error {

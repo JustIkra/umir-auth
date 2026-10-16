@@ -359,6 +359,45 @@ func Run[T application.Store](t *testing.T, newStore func() T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("registry pages are bounded and keyset ordered", func(t *testing.T) {
+		store := newStore()
+		ctx := context.Background()
+		scope := application.Scope{Actor: application.ActorSystem}
+		org := domain.Organization{OrgID: "org-1", Name: "Organization", Settings: domain.Settings{TimeZone: "Europe/Moscow", SettingsVersion: "1"}, Lifecycle: "active", LifecycleVersion: "1"}
+		if _, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+			if err := tx.Organizations().Insert(ctx, org); err != nil {
+				return err
+			}
+			for _, id := range []domain.EntityID{"restaurant-b", "restaurant-a"} {
+				if err := tx.Restaurants().Insert(ctx, domain.Restaurant{RestaurantID: id, OrgID: org.OrgID, Name: string(id), Lifecycle: "registering", LifecycleVersion: "1"}); err != nil {
+					return err
+				}
+			}
+			_, err := tx.Registry().Touch(ctx)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.View(ctx, scope, func(reader application.Reader) error {
+			first, err := reader.Registry().Page(ctx, 1, "")
+			if err != nil {
+				return err
+			}
+			if first.Revision != "2" || first.Complete || first.NextAfter != "restaurant-a" || len(first.Entries) != 1 {
+				t.Fatalf("unexpected first registry page: %#v", first)
+			}
+			second, err := reader.Registry().Page(ctx, 1, first.NextAfter)
+			if err != nil {
+				return err
+			}
+			if !second.Complete || second.NextAfter != "" || len(second.Entries) != 1 || second.Entries[0].Restaurant.RestaurantID != "restaurant-b" {
+				t.Fatalf("unexpected second registry page: %#v", second)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func checkFailedTransactionRollsBack(t *testing.T, store application.Store) {
