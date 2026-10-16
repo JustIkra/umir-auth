@@ -4,7 +4,7 @@
 
 - Add the durable-stack foundation (wave 2): reference adapters `postgres`, `rabbitmq` and `relay` copied from `umir-factory reference/durable`, pgx and amqp091 dependencies with architecture rules, the `make integration` target and the `tests/itest` helper that creates a temporary database with owner and runtime roles and a temporary RabbitMQ virtual host.
 
-- Add the initial consumer-owned `application.Store` transaction and user/session/command/organization/restaurant/membership/invitation/challenge/mail-job/budget repository contracts with a test-only memory implementation. Contract tests cover rollback, user visibility, normalized email-login uniqueness, session user references and digest uniqueness, command-key uniqueness, restaurant organization references, membership assignment scope, pending invitation uniqueness, single-use proof consumption, fenced mail-job claims, and rolling budget cutoffs; the runtime is not wired to this seam yet.
+- Add the initial consumer-owned `application.Store` transaction and user/session/command/organization/restaurant/membership/invitation/challenge/mail-job/budget/outbox repository contracts with a test-only memory implementation. Contract tests cover rollback, user visibility, normalized email-login uniqueness, session user references and digest uniqueness, command-key uniqueness, restaurant organization references, membership assignment scope, pending invitation uniqueness, single-use proof consumption, fenced mail-job claims, rolling budget cutoffs, and outbox transaction atomicity; the runtime is not wired to this seam yet.
 
 - Read the log `instance_id` from `AUTH_INSTANCE_ID` (C19); a random identifier is only the fallback when it is unset.
 

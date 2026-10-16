@@ -2,7 +2,9 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/JustIkra/umir-auth/internal/domain"
 )
@@ -45,6 +47,7 @@ var (
 	ErrLeaseLost          = errors.New("auth work lease lost")
 	ErrInvalidMailJob     = errors.New("invalid auth mail job")
 	ErrInvalidBudgetEvent = errors.New("invalid auth budget event")
+	ErrInvalidOutboxEvent = errors.New("invalid auth outbox event")
 )
 
 type Store interface {
@@ -63,6 +66,7 @@ type Reader interface {
 	Challenges() ChallengeReader
 	MailJobs() MailJobReader
 	Budgets() BudgetReader
+	Outbox() OutboxReader
 }
 
 type Tx interface {
@@ -76,6 +80,7 @@ type Tx interface {
 	Challenges() ChallengeRepository
 	MailJobs() MailJobRepository
 	Budgets() BudgetRepository
+	Outbox() OutboxRepository
 }
 
 type UserReader interface {
@@ -181,4 +186,36 @@ type BudgetReader interface {
 type BudgetRepository interface {
 	BudgetReader
 	Record(context.Context, BudgetEvent) error
+}
+
+type OutboxEvent struct {
+	ID           domain.EntityID
+	Exchange     string
+	RoutingKey   string
+	Headers      map[string]string
+	Body         []byte
+	OrgID        domain.EntityID
+	RestaurantID domain.EntityID
+	NotBefore    domain.Instant
+}
+
+type OutboxReader interface {
+	Get(context.Context, domain.EntityID) (OutboxEvent, bool, error)
+}
+
+type OutboxRepository interface {
+	OutboxReader
+	Insert(context.Context, OutboxEvent) (domain.EntityID, error)
+}
+
+func (event OutboxEvent) Validate() error {
+	if event.ID == "" || len(event.ID) > 256 || event.Exchange == "" || len(event.Exchange) > 255 || strings.ContainsRune(event.Exchange, 0) || event.RoutingKey == "" || len(event.RoutingKey) > 255 || strings.ContainsRune(event.RoutingKey, 0) || !json.Valid(event.Body) || len(event.OrgID) > 256 || len(event.RestaurantID) > 256 || strings.ContainsRune(string(event.OrgID), 0) || strings.ContainsRune(string(event.RestaurantID), 0) {
+		return ErrInvalidOutboxEvent
+	}
+	for name, value := range event.Headers {
+		if name == "" || strings.ContainsRune(name, 0) || strings.ContainsRune(value, 0) {
+			return ErrInvalidOutboxEvent
+		}
+	}
+	return nil
 }

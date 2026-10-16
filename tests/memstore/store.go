@@ -23,11 +23,12 @@ type Store struct {
 	challenges   map[domain.EntityID]domain.Challenge
 	mailJobs     map[domain.EntityID]domain.MailJob
 	budgetEvents []application.BudgetEvent
+	outbox       map[domain.EntityID]application.OutboxEvent
 	revision     domain.Version
 }
 
 func New() *Store {
-	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), invitations: make(map[domain.EntityID]domain.Invitation), challenges: make(map[domain.EntityID]domain.Challenge), mailJobs: make(map[domain.EntityID]domain.MailJob), revision: "1"}
+	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), invitations: make(map[domain.EntityID]domain.Invitation), challenges: make(map[domain.EntityID]domain.Challenge), mailJobs: make(map[domain.EntityID]domain.MailJob), outbox: make(map[domain.EntityID]application.OutboxEvent), revision: "1"}
 }
 
 func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(application.Tx) error) (application.CommitResult, error) {
@@ -50,7 +51,8 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	challenges := cloneChallenges(s.challenges)
 	mailJobs := cloneMailJobs(s.mailJobs)
 	budgetEvents := append([]application.BudgetEvent(nil), s.budgetEvents...)
-	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges, mailJobs: mailJobs, budgetEvents: &budgetEvents}
+	outbox := cloneOutbox(s.outbox)
+	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges, mailJobs: mailJobs, budgetEvents: &budgetEvents, outbox: outbox}
 	if err := fn(tx); err != nil {
 		return application.CommitResult{Outcome: application.NotCommitted}, err
 	}
@@ -68,6 +70,7 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	s.challenges = challenges
 	s.mailJobs = mailJobs
 	s.budgetEvents = budgetEvents
+	s.outbox = outbox
 	return application.CommitResult{Outcome: application.Committed, AggregateRevision: s.revision}, nil
 }
 
@@ -80,7 +83,7 @@ func (s *Store) View(ctx context.Context, scope application.Scope, fn func(appli
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges, mailJobs: s.mailJobs, budgetEvents: s.budgetEvents})
+	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges, mailJobs: s.mailJobs, budgetEvents: s.budgetEvents, outbox: s.outbox})
 }
 
 type reader struct {
@@ -94,6 +97,7 @@ type reader struct {
 	challenges   map[domain.EntityID]domain.Challenge
 	mailJobs     map[domain.EntityID]domain.MailJob
 	budgetEvents []application.BudgetEvent
+	outbox       map[domain.EntityID]application.OutboxEvent
 }
 
 func (r reader) Users() application.UserReader { return userReader{users: r.users} }
@@ -118,6 +122,7 @@ func (r reader) Challenges() application.ChallengeReader {
 }
 func (r reader) MailJobs() application.MailJobReader { return mailJobReader{mailJobs: r.mailJobs} }
 func (r reader) Budgets() application.BudgetReader   { return budgetReader{events: r.budgetEvents} }
+func (r reader) Outbox() application.OutboxReader    { return outboxRepository{events: r.outbox} }
 
 type transaction struct {
 	users        map[domain.EntityID]domain.User
@@ -130,6 +135,7 @@ type transaction struct {
 	challenges   map[domain.EntityID]domain.Challenge
 	mailJobs     map[domain.EntityID]domain.MailJob
 	budgetEvents *[]application.BudgetEvent
+	outbox       map[domain.EntityID]application.OutboxEvent
 }
 
 func (t transaction) Users() application.UserRepository {
@@ -164,6 +170,7 @@ func (t transaction) MailJobs() application.MailJobRepository {
 func (t transaction) Budgets() application.BudgetRepository {
 	return budgetRepository{budgetReader{events: *t.budgetEvents}, t.budgetEvents}
 }
+func (t transaction) Outbox() application.OutboxRepository { return outboxRepository{events: t.outbox} }
 
 type userReader struct {
 	users map[domain.EntityID]domain.User
@@ -720,6 +727,52 @@ func cloneMailJobs(mailJobs map[domain.EntityID]domain.MailJob) map[domain.Entit
 		copyOf[id] = job
 	}
 	return copyOf
+}
+
+type outboxRepository struct {
+	events map[domain.EntityID]application.OutboxEvent
+}
+
+func (r outboxRepository) Get(ctx context.Context, id domain.EntityID) (application.OutboxEvent, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return application.OutboxEvent{}, false, err
+	}
+	event, ok := r.events[id]
+	return cloneOutboxEvent(event), ok, nil
+}
+
+func (r outboxRepository) Insert(ctx context.Context, event application.OutboxEvent) (domain.EntityID, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := event.Validate(); err != nil {
+		return "", err
+	}
+	if _, ok := r.events[event.ID]; ok {
+		return "", application.ErrEntityConflict
+	}
+	r.events[event.ID] = cloneOutboxEvent(event)
+	return event.ID, nil
+}
+
+func cloneOutbox(events map[domain.EntityID]application.OutboxEvent) map[domain.EntityID]application.OutboxEvent {
+	copyOf := make(map[domain.EntityID]application.OutboxEvent, len(events))
+	for id, event := range events {
+		copyOf[id] = cloneOutboxEvent(event)
+	}
+	return copyOf
+}
+
+func cloneOutboxEvent(event application.OutboxEvent) application.OutboxEvent {
+	event.Body = append([]byte(nil), event.Body...)
+	if event.Headers != nil {
+		headers := make(map[string]string, len(event.Headers))
+		for name, value := range event.Headers {
+			headers[name] = value
+		}
+		event.Headers = headers
+	}
+	return event
 }
 
 type budgetReader struct{ events []application.BudgetEvent }

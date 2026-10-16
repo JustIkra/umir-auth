@@ -267,6 +267,48 @@ func Run[T application.Store](t *testing.T, newStore func() T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("outbox rows commit with the transaction", func(t *testing.T) {
+		store := newStore()
+		ctx := context.Background()
+		scope := application.Scope{Actor: application.ActorSystem}
+		event := application.OutboxEvent{ID: "outbox-1", Exchange: "umir.auth", RoutingKey: "auth.restaurant.deleted", Body: []byte(`{"eventID":"event-1","schemaVersion":1,"generation":"generation-1"}`)}
+		_, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+			if _, err := tx.Outbox().Insert(ctx, event); err != nil {
+				return err
+			}
+			return errors.New("abort business transaction")
+		})
+		if err == nil {
+			t.Fatal("failed business transaction committed")
+		}
+		if err := store.View(ctx, scope, func(reader application.Reader) error {
+			_, found, err := reader.Outbox().Get(ctx, event.ID)
+			if err != nil {
+				return err
+			}
+			if found {
+				t.Fatal("outbox row survived its rolled back business transaction")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.InTx(ctx, scope, func(tx application.Tx) error { _, err := tx.Outbox().Insert(ctx, event); return err }); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.View(ctx, scope, func(reader application.Reader) error {
+			_, found, err := reader.Outbox().Get(ctx, event.ID)
+			if err != nil {
+				return err
+			}
+			if !found {
+				t.Fatal("committed outbox row is missing")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func checkFailedTransactionRollsBack(t *testing.T, store application.Store) {
