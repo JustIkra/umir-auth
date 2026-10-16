@@ -4,6 +4,8 @@
 
 - Add the durable-stack foundation (wave 2): reference adapters `postgres`, `rabbitmq` and `relay` copied from `umir-factory reference/durable`, pgx and amqp091 dependencies with architecture rules, the `make integration` target and the `tests/itest` helper that creates a temporary database with owner and runtime roles and a temporary RabbitMQ virtual host.
 
+- Add the first Postgres migration for Auth's normalized tables, constraints, indexes, reference metadata and forced RLS policies. Integration checks use isolated owner/runtime roles, assert the runtime cannot own tables or bypass RLS, verify generation reads through an explicit system transaction, and verify tenant context does not leak across a reused pool connection.
+
 - Add the initial consumer-owned `application.Store` transaction and user/session/command/organization/restaurant/membership/invitation/challenge/mail-job/budget/outbox/lifecycle/registry repository contracts with a test-only memory implementation. System transactions require a reason. Contract tests cover rollback, user visibility, normalized email-login uniqueness, session user references and digest uniqueness, command-key uniqueness, restaurant organization references, membership assignment scope, pending invitation uniqueness, single-use proof consumption, fenced mail-job claims, rolling budget cutoffs, outbox transaction atomicity, lifecycle copy isolation, and bounded keyset registry pages; the runtime is not wired to this seam yet.
 
 - Read the log `instance_id` from `AUTH_INSTANCE_ID` (C19); a random identifier is only the fallback when it is unset.
