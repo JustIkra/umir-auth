@@ -309,6 +309,56 @@ func Run[T application.Store](t *testing.T, newStore func() T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("lifecycle intent and tombstone are isolated", func(t *testing.T) {
+		store := newStore()
+		ctx := context.Background()
+		scope := application.Scope{Actor: application.ActorSystem}
+		org := domain.Organization{OrgID: "org-1", Name: "Organization", Lifecycle: "deleting", LifecycleVersion: "2"}
+		restaurant := domain.Restaurant{RestaurantID: "restaurant-1", OrgID: org.OrgID, Name: "Restaurant", Lifecycle: "deleting", LifecycleVersion: "2"}
+		intent := domain.LifecycleIntent{OperationID: "operation-1", CommandID: "command-1", OrgID: org.OrgID, RestaurantIDs: []domain.EntityID{restaurant.RestaurantID}, Lifecycle: "deleting", LifecycleVersion: "2", Cleanup: "pending"}
+		tombstone := domain.Tombstone{EntityID: restaurant.RestaurantID, Kind: "restaurant", OrgID: org.OrgID, LifecycleVersion: "2", DeletedAt: "2026-10-16T00:00:00Z"}
+		if _, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+			if err := tx.Organizations().Insert(ctx, org); err != nil {
+				return err
+			}
+			if err := tx.Restaurants().Insert(ctx, restaurant); err != nil {
+				return err
+			}
+			if err := tx.Lifecycle().InsertIntent(ctx, intent); err != nil {
+				return err
+			}
+			return tx.Lifecycle().InsertTombstone(ctx, tombstone)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.View(ctx, scope, func(reader application.Reader) error {
+			stored, ok, err := reader.Lifecycle().Intent(ctx, intent.OperationID)
+			if err != nil {
+				return err
+			}
+			if !ok || len(stored.RestaurantIDs) != 1 {
+				t.Fatal("lifecycle intent missing")
+			}
+			stored.RestaurantIDs[0] = "mutated"
+			reloaded, ok, err := reader.Lifecycle().Intent(ctx, intent.OperationID)
+			if err != nil {
+				return err
+			}
+			if !ok || reloaded.RestaurantIDs[0] != restaurant.RestaurantID {
+				t.Fatal("lifecycle intent leaked mutable slice")
+			}
+			deleted, ok, err := reader.Lifecycle().Tombstone(ctx, tombstone.EntityID)
+			if err != nil {
+				return err
+			}
+			if !ok || deleted != tombstone {
+				t.Fatal("tombstone missing or changed")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func checkFailedTransactionRollsBack(t *testing.T, store application.Store) {

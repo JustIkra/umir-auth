@@ -67,6 +67,7 @@ type Reader interface {
 	MailJobs() MailJobReader
 	Budgets() BudgetReader
 	Outbox() OutboxReader
+	Lifecycle() LifecycleReader
 }
 
 type Tx interface {
@@ -81,6 +82,7 @@ type Tx interface {
 	MailJobs() MailJobRepository
 	Budgets() BudgetRepository
 	Outbox() OutboxRepository
+	Lifecycle() LifecycleRepository
 }
 
 type UserReader interface {
@@ -206,6 +208,17 @@ type OutboxReader interface {
 type OutboxRepository interface {
 	OutboxReader
 	Insert(context.Context, OutboxEvent) (domain.EntityID, error)
+}
+
+type LifecycleReader interface {
+	Intent(context.Context, domain.EntityID) (domain.LifecycleIntent, bool, error)
+	Tombstone(context.Context, domain.EntityID) (domain.Tombstone, bool, error)
+}
+
+type LifecycleRepository interface {
+	LifecycleReader
+	InsertIntent(context.Context, domain.LifecycleIntent) error
+	InsertTombstone(context.Context, domain.Tombstone) error
 }
 
 func (event OutboxEvent) Validate() error {

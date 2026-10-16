@@ -24,11 +24,13 @@ type Store struct {
 	mailJobs     map[domain.EntityID]domain.MailJob
 	budgetEvents []application.BudgetEvent
 	outbox       map[domain.EntityID]application.OutboxEvent
+	lifecycle    map[domain.EntityID]domain.LifecycleIntent
+	tombstones   map[domain.EntityID]domain.Tombstone
 	revision     domain.Version
 }
 
 func New() *Store {
-	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), invitations: make(map[domain.EntityID]domain.Invitation), challenges: make(map[domain.EntityID]domain.Challenge), mailJobs: make(map[domain.EntityID]domain.MailJob), outbox: make(map[domain.EntityID]application.OutboxEvent), revision: "1"}
+	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), invitations: make(map[domain.EntityID]domain.Invitation), challenges: make(map[domain.EntityID]domain.Challenge), mailJobs: make(map[domain.EntityID]domain.MailJob), outbox: make(map[domain.EntityID]application.OutboxEvent), lifecycle: make(map[domain.EntityID]domain.LifecycleIntent), tombstones: make(map[domain.EntityID]domain.Tombstone), revision: "1"}
 }
 
 func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(application.Tx) error) (application.CommitResult, error) {
@@ -52,7 +54,9 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	mailJobs := cloneMailJobs(s.mailJobs)
 	budgetEvents := append([]application.BudgetEvent(nil), s.budgetEvents...)
 	outbox := cloneOutbox(s.outbox)
-	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges, mailJobs: mailJobs, budgetEvents: &budgetEvents, outbox: outbox}
+	lifecycle := cloneLifecycle(s.lifecycle)
+	tombstones := cloneTombstones(s.tombstones)
+	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges, mailJobs: mailJobs, budgetEvents: &budgetEvents, outbox: outbox, lifecycle: lifecycle, tombstones: tombstones}
 	if err := fn(tx); err != nil {
 		return application.CommitResult{Outcome: application.NotCommitted}, err
 	}
@@ -71,6 +75,8 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	s.mailJobs = mailJobs
 	s.budgetEvents = budgetEvents
 	s.outbox = outbox
+	s.lifecycle = lifecycle
+	s.tombstones = tombstones
 	return application.CommitResult{Outcome: application.Committed, AggregateRevision: s.revision}, nil
 }
 
@@ -83,7 +89,7 @@ func (s *Store) View(ctx context.Context, scope application.Scope, fn func(appli
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges, mailJobs: s.mailJobs, budgetEvents: s.budgetEvents, outbox: s.outbox})
+	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges, mailJobs: s.mailJobs, budgetEvents: s.budgetEvents, outbox: s.outbox, lifecycle: s.lifecycle, tombstones: s.tombstones})
 }
 
 type reader struct {
@@ -98,6 +104,8 @@ type reader struct {
 	mailJobs     map[domain.EntityID]domain.MailJob
 	budgetEvents []application.BudgetEvent
 	outbox       map[domain.EntityID]application.OutboxEvent
+	lifecycle    map[domain.EntityID]domain.LifecycleIntent
+	tombstones   map[domain.EntityID]domain.Tombstone
 }
 
 func (r reader) Users() application.UserReader { return userReader{users: r.users} }
@@ -123,6 +131,9 @@ func (r reader) Challenges() application.ChallengeReader {
 func (r reader) MailJobs() application.MailJobReader { return mailJobReader{mailJobs: r.mailJobs} }
 func (r reader) Budgets() application.BudgetReader   { return budgetReader{events: r.budgetEvents} }
 func (r reader) Outbox() application.OutboxReader    { return outboxRepository{events: r.outbox} }
+func (r reader) Lifecycle() application.LifecycleReader {
+	return lifecycleRepository{restaurants: r.restaurants, orgs: r.orgs, lifecycle: r.lifecycle, tombstones: r.tombstones}
+}
 
 type transaction struct {
 	users        map[domain.EntityID]domain.User
@@ -136,6 +147,8 @@ type transaction struct {
 	mailJobs     map[domain.EntityID]domain.MailJob
 	budgetEvents *[]application.BudgetEvent
 	outbox       map[domain.EntityID]application.OutboxEvent
+	lifecycle    map[domain.EntityID]domain.LifecycleIntent
+	tombstones   map[domain.EntityID]domain.Tombstone
 }
 
 func (t transaction) Users() application.UserRepository {
@@ -171,6 +184,9 @@ func (t transaction) Budgets() application.BudgetRepository {
 	return budgetRepository{budgetReader{events: *t.budgetEvents}, t.budgetEvents}
 }
 func (t transaction) Outbox() application.OutboxRepository { return outboxRepository{events: t.outbox} }
+func (t transaction) Lifecycle() application.LifecycleRepository {
+	return lifecycleRepository{restaurants: t.restaurants, orgs: t.orgs, lifecycle: t.lifecycle, tombstones: t.tombstones}
+}
 
 type userReader struct {
 	users map[domain.EntityID]domain.User
@@ -773,6 +789,107 @@ func cloneOutboxEvent(event application.OutboxEvent) application.OutboxEvent {
 		event.Headers = headers
 	}
 	return event
+}
+
+type lifecycleRepository struct {
+	restaurants map[domain.EntityID]domain.Restaurant
+	orgs        map[domain.EntityID]domain.Organization
+	lifecycle   map[domain.EntityID]domain.LifecycleIntent
+	tombstones  map[domain.EntityID]domain.Tombstone
+}
+
+func (r lifecycleRepository) Intent(ctx context.Context, operationID domain.EntityID) (domain.LifecycleIntent, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.LifecycleIntent{}, false, err
+	}
+	intent, ok := r.lifecycle[operationID]
+	return cloneLifecycleIntent(intent), ok, nil
+}
+
+func (r lifecycleRepository) Tombstone(ctx context.Context, entityID domain.EntityID) (domain.Tombstone, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Tombstone{}, false, err
+	}
+	tombstone, ok := r.tombstones[entityID]
+	return tombstone, ok, nil
+}
+
+func (r lifecycleRepository) InsertIntent(ctx context.Context, intent domain.LifecycleIntent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if intent.OperationID == "" || r.lifecycle[intent.OperationID].OperationID != "" {
+		return application.ErrEntityConflict
+	}
+	if _, ok := r.orgs[intent.OrgID]; !ok {
+		return application.ErrReferenceMissing
+	}
+	for _, restaurantID := range intent.RestaurantIDs {
+		restaurant, ok := r.restaurants[restaurantID]
+		if !ok {
+			return application.ErrReferenceMissing
+		}
+		if restaurant.OrgID != intent.OrgID {
+			return application.ErrScopeMismatch
+		}
+	}
+	r.lifecycle[intent.OperationID] = cloneLifecycleIntent(intent)
+	return nil
+}
+
+func (r lifecycleRepository) InsertTombstone(ctx context.Context, tombstone domain.Tombstone) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if tombstone.EntityID == "" || r.tombstones[tombstone.EntityID].EntityID != "" {
+		return application.ErrEntityConflict
+	}
+	switch tombstone.Kind {
+	case "restaurant":
+		restaurant, ok := r.restaurants[tombstone.EntityID]
+		if !ok {
+			return application.ErrReferenceMissing
+		}
+		if restaurant.OrgID != tombstone.OrgID {
+			return application.ErrScopeMismatch
+		}
+	case "organization":
+		if _, ok := r.orgs[tombstone.EntityID]; !ok {
+			return application.ErrReferenceMissing
+		}
+		if tombstone.OrgID != tombstone.EntityID {
+			return application.ErrScopeMismatch
+		}
+	default:
+		return application.ErrInvalidScope
+	}
+	if _, err := time.Parse(time.RFC3339Nano, string(tombstone.DeletedAt)); err != nil {
+		return application.ErrInvalidScope
+	}
+	r.tombstones[tombstone.EntityID] = tombstone
+	return nil
+}
+
+func cloneLifecycle(lifecycle map[domain.EntityID]domain.LifecycleIntent) map[domain.EntityID]domain.LifecycleIntent {
+	copyOf := make(map[domain.EntityID]domain.LifecycleIntent, len(lifecycle))
+	for id, intent := range lifecycle {
+		copyOf[id] = cloneLifecycleIntent(intent)
+	}
+	return copyOf
+}
+
+func cloneLifecycleIntent(intent domain.LifecycleIntent) domain.LifecycleIntent {
+	intent.RestaurantIDs = append([]domain.EntityID(nil), intent.RestaurantIDs...)
+	intent.Services = append([]domain.PeerReadiness(nil), intent.Services...)
+	return intent
+}
+
+func cloneTombstones(tombstones map[domain.EntityID]domain.Tombstone) map[domain.EntityID]domain.Tombstone {
+	copyOf := make(map[domain.EntityID]domain.Tombstone, len(tombstones))
+	for id, tombstone := range tombstones {
+		copyOf[id] = tombstone
+	}
+	return copyOf
 }
 
 type budgetReader struct{ events []application.BudgetEvent }
