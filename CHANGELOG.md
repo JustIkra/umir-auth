@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Treat invitation addresses that differ only in case as one pending invitation per organization.
+
 - Treat an SMTP dial failure as a retryable delivery failure instead of an unknown outcome; failures after the connection is established stay unknown.
 
 - Verify an unknown login against a dummy verifier made by the selected hasher instead of the first account's stored verifier, so its cost no longer depends on that account's parameters.
