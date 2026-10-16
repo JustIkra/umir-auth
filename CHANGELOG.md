@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Coalesce peer Status calls: concurrent callers share one call per service, services are asked in parallel, and a revision change during the call reloads the aggregate and re-evaluates against the same answers instead of asking again. A reconciliation pass asks each service once, records the readiness of one restaurant in one commit and no longer re-checks status after every registration (the final observation does).
+
 - Refuse login passwords over 32 code points or with invalid UTF-8 before the failure throttle, so they no longer fill its 4096 counters or start a cooldown. The response is still InvalidCredentials.
 
 - Drop the stateful preauth issuance table and its 1024-entry cap and mutex; preauth tokens stay self-contained (HMAC and time), and the per-client issue limit belongs to Gateway.

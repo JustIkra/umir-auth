@@ -159,6 +159,7 @@ func (s *Accounts) organizationDeletion(a domain.Aggregate, l domain.LifecycleIn
 func (s *Accounts) Lifecycle(ctx context.Context, token string, org, operation domain.EntityID) (LifecycleResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var observed map[string]RuntimeStatus
 retry:
 	for {
 		if err := ctx.Err(); err != nil {
@@ -188,7 +189,7 @@ retry:
 					}
 				}
 			}
-			statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision)
+			statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision, &observed)
 			if errors.Is(err, ErrRevisionConflict) {
 				continue retry
 			}

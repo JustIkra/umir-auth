@@ -57,6 +57,7 @@ type Accounts struct {
 	loginFailures     loginThrottles
 	passwordFailures  map[domain.EntityID]*failureThrottle
 	organizationPages organizationPages
+	statusFlights     statusFlights
 }
 
 var (

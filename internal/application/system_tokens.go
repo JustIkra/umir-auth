@@ -34,6 +34,7 @@ func (s *Accounts) ServiceToken(ctx context.Context, caller, service string, id,
 	if !runtimeID.MatchString(string(epoch)) {
 		return IssuedToken{}, ErrForbidden
 	}
+	var observed map[string]RuntimeStatus
 	for {
 		if err := ctx.Err(); err != nil {
 			return IssuedToken{}, err
@@ -49,7 +50,7 @@ func (s *Accounts) ServiceToken(ctx context.Context, caller, service string, id,
 		party, subject := "umir-auth", "service:auth"
 		switch {
 		case caller == "gateway" && service == "warehouse" && operation == "expiry.due":
-			statuses, err := s.runtimeAccess(ctx, a, id)
+			statuses, err := s.runtimeAccess(ctx, a, id, &observed)
 			if errors.Is(err, ErrRevisionConflict) {
 				continue
 			}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"regexp"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/JustIkra/umir-auth/internal/domain"
@@ -40,29 +41,93 @@ type ReconciliationWaiter interface {
 	Wait(context.Context, time.Duration) error
 }
 
+// statusFlight is one Status call to a peer that concurrent callers share.
+type statusFlight struct {
+	done chan struct{}
+	st   RuntimeStatus
+	ok   bool
+}
+
+// statusFlights coalesces concurrent Status calls to the same service into one.
+type statusFlights struct {
+	mu      sync.Mutex
+	flights map[string]*statusFlight
+}
+
+// runtimeStatus asks a peer for its status. Callers that arrive while a call to
+// the same service is in flight wait for it instead of starting another. The call
+// runs on its own five-second deadline, detached from the first caller's
+// cancellation, so one cancelled request does not fail the callers sharing it.
 func (s *Accounts) runtimeStatus(ctx context.Context, service string) (RuntimeStatus, bool) {
 	if s.opts.Runtimes == nil {
 		return RuntimeStatus{}, false
 	}
-	attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	st, err := s.opts.Runtimes.Status(attempt, service)
-	return st, err == nil && st.Service == service && runtimeID.MatchString(string(st.Epoch)) && st.TZDataVersion != ""
+	f := &s.statusFlights
+	f.mu.Lock()
+	flight := f.flights[service]
+	if flight == nil {
+		flight = &statusFlight{done: make(chan struct{})}
+		if f.flights == nil {
+			f.flights = map[string]*statusFlight{}
+		}
+		f.flights[service] = flight
+		go func() {
+			attempt, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			st, err := s.opts.Runtimes.Status(attempt, service)
+			flight.st = st
+			flight.ok = err == nil && st.Service == service && runtimeID.MatchString(string(st.Epoch)) && st.TZDataVersion != ""
+			f.mu.Lock()
+			delete(f.flights, service)
+			f.mu.Unlock()
+			close(flight.done)
+		}()
+	}
+	f.mu.Unlock()
+	select {
+	case <-flight.done:
+		return flight.st, flight.ok
+	case <-ctx.Done():
+		return RuntimeStatus{}, false
+	}
+}
+
+// runtimeStatuses asks every runtime service at once; services that do not answer
+// are absent from the result.
+func (s *Accounts) runtimeStatuses(ctx context.Context) map[string]RuntimeStatus {
+	var mu sync.Mutex
+	statuses := map[string]RuntimeStatus{}
+	var wg sync.WaitGroup
+	for _, service := range runtimeServices {
+		wg.Go(func() {
+			if st, ok := s.runtimeStatus(ctx, service); ok {
+				mu.Lock()
+				statuses[service] = st
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+	return statuses
 }
 
 // The caller holds mu. Return with it held after observing peers without it.
-func (s *Accounts) observeRuntimeStatuses(ctx context.Context, revision domain.Version) (map[string]RuntimeStatus, error) {
-	s.mu.Unlock()
-	statuses := map[string]RuntimeStatus{}
-	for _, service := range runtimeServices {
-		if st, ok := s.runtimeStatus(ctx, service); ok {
-			statuses[service] = st
-		}
+// *observed carries the statuses across the caller's retry loop: once peers have
+// been asked, a retry after a revision change re-evaluates the freshly loaded
+// aggregate against the same answers instead of asking again. ErrRevisionConflict
+// means the aggregate moved during the observation; the caller reloads and
+// evaluates again.
+func (s *Accounts) observeRuntimeStatuses(ctx context.Context, revision domain.Version, observed *map[string]RuntimeStatus) (map[string]RuntimeStatus, error) {
+	if *observed != nil {
+		return *observed, nil
 	}
+	s.mu.Unlock()
+	statuses := s.runtimeStatuses(ctx)
 	s.mu.Lock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	*observed = statuses
 	current, err := s.load(ctx)
 	if err != nil {
 		return nil, err
@@ -82,7 +147,7 @@ func latestIntent(a domain.Aggregate, r domain.Restaurant) int {
 	}
 	return -1
 }
-func (s *Accounts) runtimeAccess(ctx context.Context, a domain.Aggregate, id domain.EntityID) (map[string]RuntimeStatus, error) {
+func (s *Accounts) runtimeAccess(ctx context.Context, a domain.Aggregate, id domain.EntityID, observed *map[string]RuntimeStatus) (map[string]RuntimeStatus, error) {
 	r, ok := findRestaurant(a, id)
 	if !ok || r.Lifecycle != "ready" {
 		return nil, ErrRuntimeNotReady
@@ -92,7 +157,7 @@ func (s *Accounts) runtimeAccess(ctx context.Context, a domain.Aggregate, id dom
 		return nil, ErrRuntimeNotReady
 	}
 	l := a.LifecycleIntents[i]
-	statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision)
+	statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision, observed)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +224,12 @@ func (s *Accounts) Reconcile(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	complete := true
+	// One Status per service for the whole pass; the final observation in
+	// finishReconciliation catches a peer that restarted meanwhile.
+	statuses := s.runtimeStatuses(ctx)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	for _, r := range a.Restaurants {
 		i := latestIntent(a, r)
 		if i < 0 {
@@ -166,18 +237,22 @@ func (s *Accounts) Reconcile(ctx context.Context) (bool, error) {
 			continue
 		}
 		l := a.LifecycleIntents[i]
+		expectedState := "ready"
+		if r.Lifecycle == "deleting" || r.Lifecycle == "deleted" {
+			expectedState = "closed"
+		}
+		var updates []readinessUpdate
+		var current domain.Restaurant
+		var settings domain.Settings
+		allowed, loaded := false, false
 		for _, service := range runtimeServices {
 			if err := ctx.Err(); err != nil {
 				return false, err
 			}
-			st, known := s.runtimeStatus(ctx, service)
+			st, known := statuses[service]
 			pending := domain.PeerReadiness{RestaurantID: r.RestaurantID, Service: service, State: "pending", LifecycleVersion: r.LifecycleVersion}
 			if known {
 				pending.Epoch = st.Epoch
-			}
-			expectedState := "ready"
-			if r.Lifecycle == "deleting" || r.Lifecycle == "deleted" {
-				expectedState = "closed"
 			}
 			already := false
 			for _, old := range l.Services {
@@ -188,16 +263,18 @@ func (s *Accounts) Reconcile(ctx context.Context) (bool, error) {
 			if already {
 				continue
 			}
-			if err := s.recordReadiness(ctx, l.OperationID, pending, nil); err != nil {
-				return false, err
-			}
+			updates = append(updates, readinessUpdate{peer: pending})
 			if !known {
 				complete = false
 				continue
 			}
-			current, settings, allowed, err := s.currentLifecycle(ctx, r.RestaurantID, l.OperationID, r.LifecycleVersion)
-			if err != nil {
-				return false, err
+			if !loaded {
+				var err error
+				current, settings, allowed, err = s.currentLifecycle(ctx, r.RestaurantID, l.OperationID, r.LifecycleVersion)
+				if err != nil {
+					return false, err
+				}
+				loaded = true
 			}
 			if !allowed {
 				complete = false
@@ -205,6 +282,7 @@ func (s *Accounts) Reconcile(ctx context.Context) (bool, error) {
 			}
 			attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
 			var ack domain.PeerReadiness
+			var err error
 			if current.Lifecycle == "deleting" || current.Lifecycle == "deleted" {
 				ack, err = s.opts.Runtimes.Close(attempt, service, r.RestaurantID, CloseRuntime{OperationID: l.OperationID, ExpectedEpoch: st.Epoch, LifecycleVersion: r.LifecycleVersion})
 			} else {
@@ -215,12 +293,14 @@ func (s *Accounts) Reconcile(ctx context.Context) (bool, error) {
 			if current.Lifecycle == "deleting" || current.Lifecycle == "deleted" {
 				expected = "closed"
 			}
-			after, ok := s.runtimeStatus(ctx, service)
-			if err != nil || !ok || after.Epoch != st.Epoch || ack.RestaurantID != r.RestaurantID || ack.Service != service || ack.Epoch != st.Epoch || ack.LifecycleVersion != r.LifecycleVersion || ack.State != expected {
+			if err != nil || ack.RestaurantID != r.RestaurantID || ack.Service != service || ack.Epoch != st.Epoch || ack.LifecycleVersion != r.LifecycleVersion || ack.State != expected {
 				complete = false
 				continue
 			}
-			if err := s.recordReadiness(ctx, l.OperationID, ack, &settings); err != nil {
+			updates[len(updates)-1] = readinessUpdate{peer: ack, settings: &settings}
+		}
+		if len(updates) > 0 {
+			if err := s.recordReadiness(ctx, l.OperationID, updates); err != nil {
 				return false, err
 			}
 		}
@@ -317,68 +397,18 @@ func (s *Accounts) prepareReconciliation(ctx context.Context) error {
 		return nil
 	}
 }
-func (s *Accounts) recordReadiness(ctx context.Context, operation domain.EntityID, peer domain.PeerReadiness, settings *domain.Settings) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		a, err := s.load(ctx)
-		if err != nil {
-			return err
-		}
-		r, ok := findRestaurant(a, peer.RestaurantID)
-		i := latestIntent(a, r)
-		if !ok || i < 0 || a.LifecycleIntents[i].OperationID != operation || r.LifecycleVersion != peer.LifecycleVersion {
-			return nil
-		}
-		if settings != nil {
-			current := false
-			for _, org := range a.Organizations {
-				if org.OrgID == r.OrgID && org.Settings == *settings {
-					current = true
-					break
-				}
-			}
-			if !current {
-				return nil
-			}
-		}
-		l := &a.LifecycleIntents[i]
-		for j := range l.Services {
-			p := &l.Services[j]
-			if p.RestaurantID != peer.RestaurantID || p.Service != peer.Service {
-				continue
-			}
-			if *p == peer {
-				return nil
-			}
-			*p = peer
-			if peer.State == "pending" {
-				if l.Cleanup == "not_required" {
-					l.Lifecycle = "registering"
-					for n := range a.Restaurants {
-						if a.Restaurants[n].RestaurantID == peer.RestaurantID && a.Restaurants[n].Lifecycle == "ready" {
-							a.Restaurants[n].Lifecycle = "registering"
-						}
-					}
-				} else {
-					l.Lifecycle = "deleting"
-					l.Cleanup = "pending"
-				}
-			}
-			if err := s.commit(ctx, a); err != nil {
-				if errors.Is(err, ErrRevisionConflict) {
-					break
-				}
-				return err
-			}
-			return nil
-		}
-	}
+
+// readinessUpdate is one peer state to record. A non-nil settings means an
+// acknowledgment that is only valid while the organization still has them.
+type readinessUpdate struct {
+	peer     domain.PeerReadiness
+	settings *domain.Settings
 }
-func (s *Accounts) finishReconciliation(ctx context.Context) error {
+
+// recordReadiness records the updates of one restaurant in a single commit. An
+// update whose restaurant, lifecycle version, intent or settings changed since it
+// was observed is dropped.
+func (s *Accounts) recordReadiness(ctx context.Context, operation domain.EntityID, updates []readinessUpdate) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for {
@@ -390,7 +420,78 @@ func (s *Accounts) finishReconciliation(ctx context.Context) error {
 			return err
 		}
 		changed := false
-		statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision)
+		for _, u := range updates {
+			peer := u.peer
+			r, ok := findRestaurant(a, peer.RestaurantID)
+			i := latestIntent(a, r)
+			if !ok || i < 0 || a.LifecycleIntents[i].OperationID != operation || r.LifecycleVersion != peer.LifecycleVersion {
+				continue
+			}
+			if u.settings != nil {
+				current := false
+				for _, org := range a.Organizations {
+					if org.OrgID == r.OrgID && org.Settings == *u.settings {
+						current = true
+						break
+					}
+				}
+				if !current {
+					continue
+				}
+			}
+			l := &a.LifecycleIntents[i]
+			for j := range l.Services {
+				p := &l.Services[j]
+				if p.RestaurantID != peer.RestaurantID || p.Service != peer.Service {
+					continue
+				}
+				if *p == peer {
+					break
+				}
+				*p = peer
+				changed = true
+				if peer.State == "pending" {
+					if l.Cleanup == "not_required" {
+						l.Lifecycle = "registering"
+						for n := range a.Restaurants {
+							if a.Restaurants[n].RestaurantID == peer.RestaurantID && a.Restaurants[n].Lifecycle == "ready" {
+								a.Restaurants[n].Lifecycle = "registering"
+							}
+						}
+					} else {
+						l.Lifecycle = "deleting"
+						l.Cleanup = "pending"
+					}
+				}
+				break
+			}
+		}
+		if !changed {
+			return nil
+		}
+		if err := s.commit(ctx, a); err != nil {
+			if errors.Is(err, ErrRevisionConflict) {
+				continue
+			}
+			return err
+		}
+		return nil
+	}
+}
+func (s *Accounts) finishReconciliation(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var observed map[string]RuntimeStatus
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		a, err := s.load(ctx)
+		if err != nil {
+			return err
+		}
+		changed := false
+		statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision, &observed)
 		if errors.Is(err, ErrRevisionConflict) {
 			continue
 		}
