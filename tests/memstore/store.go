@@ -13,11 +13,12 @@ type Store struct {
 	mu       sync.RWMutex
 	users    map[domain.EntityID]domain.User
 	sessions map[domain.EntityID]domain.Session
+	commands map[application.CommandKey]domain.IdempotencyRecord
 	revision domain.Version
 }
 
 func New() *Store {
-	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), revision: "1"}
+	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), revision: "1"}
 }
 
 func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(application.Tx) error) (application.CommitResult, error) {
@@ -32,7 +33,8 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	}
 	users := cloneUsers(s.users)
 	sessions := cloneSessions(s.sessions)
-	tx := transaction{users: users, sessions: sessions}
+	commands := cloneCommands(s.commands)
+	tx := transaction{users: users, sessions: sessions, commands: commands}
 	if err := fn(tx); err != nil {
 		return application.CommitResult{Outcome: application.NotCommitted}, err
 	}
@@ -42,6 +44,7 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	s.revision = domain.Version(strconv.FormatInt(n+1, 10))
 	s.users = users
 	s.sessions = sessions
+	s.commands = commands
 	return application.CommitResult{Outcome: application.Committed, AggregateRevision: s.revision}, nil
 }
 
@@ -54,20 +57,25 @@ func (s *Store) View(ctx context.Context, scope application.Scope, fn func(appli
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(reader{users: s.users, sessions: s.sessions})
+	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands})
 }
 
 type reader struct {
 	users    map[domain.EntityID]domain.User
 	sessions map[domain.EntityID]domain.Session
+	commands map[application.CommandKey]domain.IdempotencyRecord
 }
 
-func (r reader) Users() application.UserReader       { return userReader{users: r.users} }
-func (r reader) Sessions() application.SessionReader { return sessionReader(r) }
+func (r reader) Users() application.UserReader { return userReader{users: r.users} }
+func (r reader) Sessions() application.SessionReader {
+	return sessionReader{users: r.users, sessions: r.sessions}
+}
+func (r reader) Commands() application.CommandReader { return commandReader{commands: r.commands} }
 
 type transaction struct {
 	users    map[domain.EntityID]domain.User
 	sessions map[domain.EntityID]domain.Session
+	commands map[application.CommandKey]domain.IdempotencyRecord
 }
 
 func (t transaction) Users() application.UserRepository {
@@ -75,7 +83,11 @@ func (t transaction) Users() application.UserRepository {
 }
 
 func (t transaction) Sessions() application.SessionRepository {
-	return sessionRepository{sessionReader(t)}
+	return sessionRepository{sessionReader{users: t.users, sessions: t.sessions}}
+}
+
+func (t transaction) Commands() application.CommandRepository {
+	return commandRepository{commandReader{commands: t.commands}}
 }
 
 type userReader struct {
@@ -167,6 +179,39 @@ func (r sessionRepository) Insert(ctx context.Context, session domain.Session) e
 	return nil
 }
 
+type commandReader struct {
+	commands map[application.CommandKey]domain.IdempotencyRecord
+}
+
+func (r commandReader) Get(ctx context.Context, key application.CommandKey) (domain.IdempotencyRecord, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.IdempotencyRecord{}, false, err
+	}
+	record, ok := r.commands[key]
+	if ok {
+		record.JobIDs = append([]domain.EntityID(nil), record.JobIDs...)
+	}
+	return record, ok, nil
+}
+
+type commandRepository struct{ commandReader }
+
+func (r commandRepository) Insert(ctx context.Context, record domain.IdempotencyRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	key := application.CommandKeyOf(record)
+	if key.OperationID == "" || key.CommandID == "" {
+		return application.ErrInvalidCommand
+	}
+	if _, ok := r.commands[key]; ok {
+		return application.ErrEntityConflict
+	}
+	record.JobIDs = append([]domain.EntityID(nil), record.JobIDs...)
+	r.commands[key] = record
+	return nil
+}
+
 func check(ctx context.Context, scope application.Scope) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -191,6 +236,15 @@ func cloneSessions(sessions map[domain.EntityID]domain.Session) map[domain.Entit
 	copyOf := make(map[domain.EntityID]domain.Session, len(sessions))
 	for id, session := range sessions {
 		copyOf[id] = session
+	}
+	return copyOf
+}
+
+func cloneCommands(commands map[application.CommandKey]domain.IdempotencyRecord) map[application.CommandKey]domain.IdempotencyRecord {
+	copyOf := make(map[application.CommandKey]domain.IdempotencyRecord, len(commands))
+	for key, record := range commands {
+		record.JobIDs = append([]domain.EntityID(nil), record.JobIDs...)
+		copyOf[key] = record
 	}
 	return copyOf
 }

@@ -23,8 +23,22 @@ type Scope struct {
 	UserID       domain.EntityID
 }
 
+type CommandKey struct {
+	ActorID       domain.EntityID
+	PreauthDigest string
+	OperationID   string
+	OrgID         domain.EntityID
+	RestaurantID  domain.EntityID
+	CommandID     string
+}
+
+func CommandKeyOf(record domain.IdempotencyRecord) CommandKey {
+	return CommandKey{ActorID: record.ActorID, PreauthDigest: record.PreauthDigest, OperationID: record.OperationID, OrgID: record.OrgID, RestaurantID: record.RestaurantID, CommandID: record.CommandID}
+}
+
 var (
 	ErrEntityConflict   = errors.New("auth entity conflict")
+	ErrInvalidCommand   = errors.New("invalid auth command identity")
 	ErrReferenceMissing = errors.New("auth entity reference missing")
 	ErrInvalidScope     = errors.New("invalid auth storage scope")
 )
@@ -37,11 +51,13 @@ type Store interface {
 type Reader interface {
 	Users() UserReader
 	Sessions() SessionReader
+	Commands() CommandReader
 }
 
 type Tx interface {
 	Users() UserRepository
 	Sessions() SessionRepository
+	Commands() CommandRepository
 }
 
 type UserReader interface {
@@ -62,4 +78,13 @@ type SessionReader interface {
 type SessionRepository interface {
 	SessionReader
 	Insert(context.Context, domain.Session) error
+}
+
+type CommandReader interface {
+	Get(context.Context, CommandKey) (domain.IdempotencyRecord, bool, error)
+}
+
+type CommandRepository interface {
+	CommandReader
+	Insert(context.Context, domain.IdempotencyRecord) error
 }

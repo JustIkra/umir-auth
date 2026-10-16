@@ -62,6 +62,24 @@ func Run[T application.Store](t *testing.T, newStore func() T) {
 			t.Fatalf("duplicate session digest was accepted: %v", err)
 		}
 	})
+	t.Run("command identity uniqueness", func(t *testing.T) {
+		store := newStore()
+		ctx := context.Background()
+		scope := application.Scope{Actor: application.ActorAnonymous}
+		command := domain.IdempotencyRecord{PreauthDigest: "preauth", OperationID: "login", CommandID: "command-1", Fingerprint: "first"}
+		if _, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+			return tx.Commands().Insert(ctx, command)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		command.Fingerprint = "different"
+		_, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+			return tx.Commands().Insert(ctx, command)
+		})
+		if !errors.Is(err, application.ErrEntityConflict) {
+			t.Fatalf("command key reused with a different fingerprint: %v", err)
+		}
+	})
 }
 
 func checkFailedTransactionRollsBack(t *testing.T, store application.Store) {
