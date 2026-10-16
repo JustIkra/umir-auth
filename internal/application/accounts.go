@@ -58,6 +58,24 @@ type Accounts struct {
 	passwordFailures  map[domain.EntityID]*failureThrottle
 	organizationPages organizationPages
 	statusFlights     statusFlights
+	dummy             dummyVerifier
+}
+
+// dummyVerifier is a verifier made by the selected hasher for a password nobody
+// knows. An unknown login is verified against it, so the work it costs equals
+// that of a known login under the current parameters and never depends on the
+// stored parameters of any real account.
+type dummyVerifier struct {
+	once  sync.Once
+	value string
+	err   error
+}
+
+func (s *Accounts) dummyVerifier() (string, error) {
+	s.dummy.once.Do(func() {
+		s.dummy.value, s.dummy.err = s.opts.Passwords.Hash("umir-auth unknown-login equalizer")
+	})
+	return s.dummy.value, s.dummy.err
 }
 
 var (
@@ -277,7 +295,13 @@ func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error
 		return SessionView{}, rateLimited(wait)
 	}
 	s.mu.Unlock()
-	ok, err := s.opts.Passwords.Verify(in.Password, user.Verifier)
+	stored := user.Verifier
+	if !known {
+		if stored, err = s.dummyVerifier(); err != nil {
+			return SessionView{}, ErrAuthUnavailable
+		}
+	}
+	ok, err := s.opts.Passwords.Verify(in.Password, stored)
 	if err != nil {
 		return SessionView{}, ErrAuthUnavailable
 	}

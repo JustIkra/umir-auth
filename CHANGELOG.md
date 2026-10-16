@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Verify an unknown login against a dummy verifier made by the selected hasher instead of the first account's stored verifier, so its cost no longer depends on that account's parameters.
+
 - Hash passwords outside the Accounts mutex for invited-user completion and password reset, as registration already did: the hash runs behind the bounded password gate after a read-only precheck, an exact repeat needs no hash, and the command re-checks proof, credentials and identity at commit time.
 
 - Supervise background workers: unrecoverable errors (`ErrRecoveryRequired`, `ErrUpdateOutcomeUnknown`, `ErrClosed`) stop `Serve` with the error so the process exits and is restarted; other errors back off 1 to 30 seconds and retry. `Ready` no longer fails because of a worker, and the JWKS route is gated only by signing readiness. Add structured JSON logging (observability section 3 fields) with `auth.worker.degraded|recovered|fatal` and `auth.mail.attempt` events that carry no codes, addresses or tokens. `MailDelivery` gains `Attempt` and `Age`.
