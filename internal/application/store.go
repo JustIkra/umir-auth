@@ -24,8 +24,9 @@ type Scope struct {
 }
 
 var (
-	ErrEntityConflict = errors.New("auth entity conflict")
-	ErrInvalidScope   = errors.New("invalid auth storage scope")
+	ErrEntityConflict   = errors.New("auth entity conflict")
+	ErrReferenceMissing = errors.New("auth entity reference missing")
+	ErrInvalidScope     = errors.New("invalid auth storage scope")
 )
 
 type Store interface {
@@ -35,10 +36,12 @@ type Store interface {
 
 type Reader interface {
 	Users() UserReader
+	Sessions() SessionReader
 }
 
 type Tx interface {
 	Users() UserRepository
+	Sessions() SessionRepository
 }
 
 type UserReader interface {
@@ -48,4 +51,15 @@ type UserReader interface {
 type UserRepository interface {
 	UserReader
 	Insert(context.Context, domain.User) error
+}
+
+type SessionReader interface {
+	Get(context.Context, domain.EntityID) (domain.Session, bool, error)
+	ByDigest(context.Context, string) (domain.Session, bool, error)
+	ForUser(context.Context, domain.EntityID) ([]domain.Session, error)
+}
+
+type SessionRepository interface {
+	SessionReader
+	Insert(context.Context, domain.Session) error
 }
