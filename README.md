@@ -373,3 +373,7 @@ Resulting bounds, at the defaults:
 Several accounts and parallel clients therefore do not multiply the per-address figure; they only add addresses. An account takeover through password reset needs a code for that exact address, so the per-address row is the risk for a chosen victim, and the Gateway per-client limits (not Auth's) are the control against one client trying many addresses.
 
 Clock. All Go services run on one VM; the `iat` tolerance is zero and stays zero. If the clock steps backwards, the signer refuses to issue tokens and to publish keys until the clock reaches the latest instant it has seen. Running Auth across hosts requires synchronized clocks. The tests `internal/adapters/jwt/clock_step_test.go` record this behaviour.
+
+## Durable storage migration (wave 2, in progress)
+
+The branch `feat/durable-w2-auth` adds the reference PostgreSQL, RabbitMQ and outbox-relay adapters (copied from `umir-factory reference/durable`, not edited), the `make integration` target and the `tests/itest` helper. The storage port, Postgres schema, subcommands, outbox and R3 are not done yet; the service still runs on the JSON file store. See `docs/superpowers/plans/2026-10-16-durable-w2-auth.md` in the umir-2026 workspace.
