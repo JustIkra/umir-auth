@@ -484,3 +484,38 @@ func TestReplayAfterSweepIsCommandConflictUnknownOverHTTP(t *testing.T) {
 		t.Fatal("replay after purge created a challenge or changed state")
 	}
 }
+
+// A verify or complete command is not tombstoned: its stored result stays under
+// the (unchanged) idempotency retention, so an exact repeat still replays it after
+// the challenge itself is gone, and a different request under the key conflicts.
+func TestVerifyAndCompleteReplayAfterChallengePurge(t *testing.T) {
+	e := registrationSetup(t)
+	v := registrationBegin(t, e, "replay-purge@umir.invalid", "replay-begin")
+	code := e.code(t, v.ChallengeID)
+	proof := registrationProof(t, e, v, "replay-verify")
+	complete := registrationComplete(proof, "replay-complete")
+	session, err := e.accounts.CompleteEmailChallenge(ctx, e.actor, complete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.advance(t, withProofTTL)
+	sweep(t, e)
+	assertGone(t, e, v.ChallengeID)
+	snapshot := loadEnrollment(t, e)
+	again, err := e.accounts.VerifyChallenge(ctx, e.actor, application.ChallengeVerifyInput{CommandID: "replay-verify", ChallengeID: v.ChallengeID, Code: "123456"})
+	if !errors.Is(err, application.ErrCommandConflict) {
+		t.Fatalf("verify with another code under the key = %v, %+v", err, again)
+	}
+	repeated, err := e.accounts.VerifyChallenge(ctx, e.actor, application.ChallengeVerifyInput{CommandID: "replay-verify", ChallengeID: v.ChallengeID, Code: code})
+	if err != nil || repeated.Proof != proof.Proof {
+		t.Fatalf("verify replay after the purge = %v", err)
+	}
+	if _, err := e.accounts.CompleteEmailChallenge(ctx, e.actor, complete); errors.Is(err, application.ErrChallengeUnavailable) {
+		t.Fatalf("complete replay after the purge reports an unknown challenge: %v", err)
+	} else if err == nil && session.Token == "" {
+		t.Fatal("complete replay returned no session")
+	}
+	if !reflect.DeepEqual(snapshot, loadEnrollment(t, e)) {
+		t.Fatal("replays after the purge changed state")
+	}
+}

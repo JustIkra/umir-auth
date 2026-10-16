@@ -63,15 +63,9 @@ func enrollmentCommand[T any](s *Accounts, ctx context.Context, actor ChallengeA
 		if err != nil {
 			return zero, err
 		}
-		if err := access(a, who); err != nil {
-			if errors.Is(err, ErrChallengeUnavailable) && domain.IsChallengeCommand(operation) {
-				// The challenge may be gone together with its result: an exact
-				// repeat of its command must not be reported as an unknown challenge.
-				if cleared := s.clearedReplay(a, who, operation, org, command, input); cleared != nil {
-					return zero, cleared
-				}
-			}
-			return zero, err
+		accessErr := access(a, who)
+		if accessErr != nil && !errors.Is(accessErr, ErrChallengeUnavailable) {
+			return zero, accessErr
 		}
 		profile := "C2"
 		if operation == "createInvitation" || operation == "resendInvitationLink" {
@@ -126,6 +120,10 @@ func enrollmentCommand[T any](s *Accounts, ctx context.Context, actor ChallengeA
 				}
 			}
 			return zero, nil
+		}
+		if accessErr != nil {
+			// The challenge may be gone (purged) while the key has no record.
+			return zero, accessErr
 		}
 		changed, err := change(&a, who)
 		if err != nil {
@@ -191,27 +189,6 @@ func (s *Accounts) enrollmentFingerprint(who enrollmentActor, operation string, 
 		return "", ErrAuthUnavailable
 	}
 	return TokenDigest(string(tuple)), nil
-}
-
-// clearedReplay answers a repeat of a challenge command whose result was removed
-// with its challenge: ErrCommandResultCleared for the same request,
-// ErrCommandConflict for a different one under the same key, nil when there is no
-// tombstone for the key.
-func (s *Accounts) clearedReplay(a domain.Aggregate, who enrollmentActor, operation string, org domain.EntityID, command string, input any) error {
-	for _, r := range a.Idempotency {
-		if r.ActorID != who.user.UserID || r.PreauthDigest != who.preauth || r.OperationID != operation || r.OrgID != org || r.RestaurantID != "" || r.CommandID != command || !domain.IsCommandTombstone(r) {
-			continue
-		}
-		fp, err := s.enrollmentFingerprint(who, operation, org, input, r.ContractProfile)
-		if err != nil {
-			return err
-		}
-		if r.Fingerprint != fp {
-			return ErrCommandConflict
-		}
-		return ErrCommandResultCleared
-	}
-	return nil
 }
 
 type enrollmentErrorResult struct {

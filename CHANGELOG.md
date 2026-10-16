@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Replay stored verify and complete results of an enrollment command even after its challenge was purged, instead of answering an unknown challenge.
+
 - Purge expired email challenges and their OTP jobs in the outbox sweep (one hour after expiry or the last wrong attempt, 24 hours after proof expiry; never while a job is queued, sending or unknown) and replace their begin/resend command records with tombstones. A repeat of such a command answers the existing 409 CommandConflict with outcome unknown and issues no challenge. Keeps the 4096 cap as a defensive limit that password-reset floods no longer reach. The file store now takes the Auth clock to validate removals.
 
 - Resolve registration review issues #5–7: separate mail budget, persisted per-address wrong-code budget, creator organization quota/rate, neutral password reset, default-disabled email-code login, disabled outbox suppression, case-insensitive address ownership, bounded command IDs and registration hashing outside the aggregate lock. Preserve stored identities and replay fingerprints. Document v3 backup-only rollback and the deferred challenge-storage cap.
