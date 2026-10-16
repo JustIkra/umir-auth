@@ -15,6 +15,7 @@ import (
 
 	"github.com/JustIkra/umir-auth/bootstrap"
 	"github.com/JustIkra/umir-auth/internal/application"
+	"github.com/JustIkra/umir-auth/internal/domain"
 )
 
 type lockedBuffer struct {
@@ -263,4 +264,56 @@ func TestMailAttemptLogCarriesNoRecipientCodeOrToken(t *testing.T) {
 			t.Fatalf("log contains %q", secretText)
 		}
 	}
+}
+
+// unknownCommitRepo loads normally but reports every commit as unknown, like a
+// store that lost its answer.
+type unknownCommitRepo struct {
+	application.AggregateRepository
+}
+
+func (unknownCommitRepo) Commit(context.Context, domain.Version, domain.ValidatedAggregate) (application.CommitResult, error) {
+	return application.CommitResult{Outcome: application.Unknown}, application.ErrStorageUnavailable
+}
+
+// An unknown outcome inside an HTTP request leaves Accounts refusing all work. The
+// workers then see only plain unavailable errors, but the process must still stop
+// so that it restarts, instead of staying alive and answering 503.
+func TestRecoveryStartedByARequestStopsTheProcess(t *testing.T) {
+	r, o, logs := openWithLog(t)
+	opts := r.AccountOptions
+	opts.Repository = unknownCommitRepo{opts.Repository}
+	accounts, err := application.NewAccounts(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Accounts = accounts
+	r.Pause = &recordingPause{check: func() {}}
+	_, _, done := startServe(t, r, o, accountsProcessor{}, mailSuccessSender{})
+	if _, err := accounts.Login(context.Background(), application.LoginInput{Login: o.Initial.Login, Password: o.Password}); !errors.Is(err, application.ErrUpdateOutcomeUnknown) {
+		t.Fatalf("login = %v; want an unknown outcome", err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, application.ErrRecoveryRequired) {
+			t.Fatalf("Serve returned %v; want a recovery-required stop", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the process stayed alive after a request left Accounts in recovery")
+	}
+	fatal := 0
+	for _, rec := range logs.records(t) {
+		if rec["event"] == "auth.worker.fatal" {
+			fatal++
+		}
+	}
+	if fatal == 0 {
+		t.Fatal("no auth.worker.fatal record")
+	}
+}
+
+type accountsProcessor struct{}
+
+func (accountsProcessor) ProcessMail(ctx context.Context, accounts *application.Accounts, sender application.MailSender) (bool, error) {
+	return accounts.ProcessMail(ctx, sender)
 }

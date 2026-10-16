@@ -80,6 +80,11 @@ func (r *Runtime) supervise(ctx context.Context, name string, fatal chan<- error
 		if err == nil {
 			err = application.ErrAuthUnavailable
 		}
+		if r.Accounts.RecoveryPending() && !errors.Is(err, application.ErrRecoveryRequired) {
+			// A request put Accounts in recovery; the worker only sees a plain
+			// unavailable error from now on, but the process must restart.
+			err = errors.Join(err, application.ErrRecoveryRequired)
+		}
 		if fatalWorkerError(err) {
 			r.Log.Error("worker stopped the process", "event", "auth.worker.fatal", "worker", name, "error_class", errorClass(err))
 			select {

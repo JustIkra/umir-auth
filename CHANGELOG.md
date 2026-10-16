@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stop the process when a request leaves Accounts in recovery (unknown update outcome): `Accounts.RecoveryPending` makes the worker supervisor treat the next worker error as unrecoverable, so the container restarts instead of staying alive and answering 503.
+
 - Document the OTP threat model and pin the OTP budgets (ten wrong codes per address per hour, three issues per address per ten minutes shared with invitations) and the signer's clock-step and zero-`iat`-leeway behaviour with tests. No behaviour change.
 
 - Treat invitation addresses that differ only in case as one pending invitation per organization.

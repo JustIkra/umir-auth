@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -52,6 +53,7 @@ type Accounts struct {
 	mu                sync.Mutex
 	reconciling       chan struct{}
 	recovering        bool
+	recoveryPending   atomic.Bool
 	gate              *verificationGate
 	changing          chan struct{}
 	loginFailures     loginThrottles
@@ -175,6 +177,18 @@ func NewAccounts(ctx context.Context, o AccountOptions) (*Accounts, error) {
 	}
 	return s, nil
 }
+// setRecovering records, under s.mu, that the stored state is in doubt: every
+// later request fails until the process restarts and reloads it.
+func (s *Accounts) setRecovering() {
+	s.recovering = true
+	s.recoveryPending.Store(true)
+}
+
+// RecoveryPending reports whether an update outcome became unknown or recovery
+// was required, after which Accounts refuses all work. It is safe to call without
+// any lock; a supervisor treats it as a reason to stop the process so it restarts.
+func (s *Accounts) RecoveryPending() bool { return s.recoveryPending.Load() }
+
 func (s *Accounts) load(ctx context.Context) (domain.Aggregate, error) {
 	if s.recovering {
 		return domain.Aggregate{}, ErrAuthUnavailable
@@ -182,7 +196,7 @@ func (s *Accounts) load(ctx context.Context) (domain.Aggregate, error) {
 	a, err := s.opts.Repository.Load(ctx)
 	if err != nil {
 		if errors.Is(err, ErrRecoveryRequired) {
-			s.recovering = true
+			s.setRecovering()
 		}
 		return domain.Aggregate{}, errors.Join(ErrAuthUnavailable, err)
 	}
@@ -198,7 +212,7 @@ func (s *Accounts) inspect(ctx context.Context, fn func(*domain.Aggregate)) erro
 	a, err := s.opts.Repository.Load(ctx)
 	if err != nil {
 		if errors.Is(err, ErrRecoveryRequired) {
-			s.recovering = true
+			s.setRecovering()
 		}
 		return errors.Join(ErrAuthUnavailable, err)
 	}
@@ -223,7 +237,7 @@ func (s *Accounts) commit(ctx context.Context, a domain.Aggregate) error {
 	if r.Outcome == NotCommitted && !errors.Is(err, ErrRecoveryRequired) {
 		return errors.Join(ErrStorageUnavailable, err)
 	}
-	s.recovering = true
+	s.setRecovering()
 	return errors.Join(ErrUpdateOutcomeUnknown, err)
 }
 func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error) {
