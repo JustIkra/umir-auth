@@ -54,7 +54,7 @@ func TestSMTPDialFailureRetriesAndLaterFailureStaysUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	port := closed.Addr().(*net.TCPAddr).Port
+	port := listenerPort(t, closed)
 	if err := closed.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,16 @@ func TestSMTPDialFailureRetriesAndLaterFailureStaysUnknown(t *testing.T) {
 			}
 		}
 	}()
-	if result := dialTestSMTP(t, hangup.Addr().(*net.TCPAddr).Port); result.Success || result.Permanent || !result.Unknown {
+	if result := dialTestSMTP(t, listenerPort(t, hangup)); result.Success || result.Permanent || !result.Unknown {
 		t.Fatalf("a hang-up after connecting is %+v; want unknown", result)
 	}
+}
+
+func listenerPort(t *testing.T, l net.Listener) int {
+	t.Helper()
+	addr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatal("listener is not TCP")
+	}
+	return addr.Port
 }
