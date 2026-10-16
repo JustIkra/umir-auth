@@ -96,6 +96,9 @@ func (s *Accounts) LookupCommand(ctx context.Context, actor ChallengeActor, name
 			return CommandResult{}, e
 		}
 	}
+	if domain.IsCommandTombstone(*found) {
+		return CommandResult{}, ErrCommandResultCleared
+	}
 	if s.opts.Results == nil {
 		return CommandResult{}, ErrAuthUnavailable
 	}

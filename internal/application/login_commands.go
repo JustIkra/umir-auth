@@ -3,12 +3,18 @@ package application
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/JustIkra/umir-auth/internal/domain"
 )
 
 var ErrCommandConflict = errors.New("auth command conflict")
+
+// ErrCommandResultCleared answers an exact repeat of a challenge command whose
+// result was removed with its challenge. It is a command conflict with an
+// unknown outcome (C29): the command is never executed again.
+var ErrCommandResultCleared = fmt.Errorf("%w: result cleared", ErrCommandConflict)
 
 type ResultSecrets interface {
 	Digest([]byte) (string, error)

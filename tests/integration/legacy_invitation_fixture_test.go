@@ -62,7 +62,7 @@ func legacyInvitationFixture(t *testing.T, f *membershipFixture) domain.Invitati
 		t.Fatal(err)
 	}
 	f.path = filepath.Join(t.TempDir(), "auth.json")
-	f.store, err = jsonstore.Initialize(ctx, f.path, validate(t, a))
+	f.store, err = jsonstore.Initialize(ctx, f.path, validate(t, a), jsonstore.WithClock(f.opts.Clock))
 	if err != nil {
 		t.Fatal(err)
 	}

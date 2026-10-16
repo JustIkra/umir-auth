@@ -142,9 +142,9 @@ func open(ctx context.Context, o Options, imported *domain.ValidatedAggregate) (
 				return nil, ErrBootstrapConflict
 			}
 		}
-		store, err = jsonstore.Initialize(ctx, o.StateFile, v)
+		store, err = jsonstore.Initialize(ctx, o.StateFile, v, jsonstore.WithClock(o.Clock))
 	} else {
-		store, err = jsonstore.Open(ctx, o.StateFile)
+		store, err = jsonstore.Open(ctx, o.StateFile, jsonstore.WithClock(o.Clock))
 	}
 	if err != nil {
 		return nil, errors.Join(ErrNotReady, err)

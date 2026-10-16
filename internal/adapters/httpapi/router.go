@@ -197,6 +197,8 @@ func failure(w http.ResponseWriter, e error) {
 		status, code, outcome = 403, "InvalidCsrfToken", "not_committed"
 	case errors.Is(e, application.ErrForbidden):
 		status, code, outcome = 403, "Forbidden", "not_committed"
+	case errors.Is(e, application.ErrCommandResultCleared):
+		status, code, outcome = 409, "CommandConflict", "unknown"
 	case errors.Is(e, application.ErrCommandConflict):
 		status, code, outcome = 409, "CommandConflict", "not_committed"
 	case errors.Is(e, application.ErrRuntimeNotReady):

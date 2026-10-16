@@ -47,7 +47,8 @@ func membershipsSetup(t *testing.T) *membershipFixture {
 	a.Memberships = append(a.Memberships, domain.Membership{MembershipID: f.admin2, MembershipVersion: "1", UserID: uid(50), OrgID: f.org, OrgRoles: []string{"Admin"}, Assignments: []domain.Assignment{}, State: "active"}, domain.Membership{MembershipID: f.employee, MembershipVersion: "1", UserID: uid(51), OrgID: f.org, OrgRoles: []string{}, Assignments: []domain.Assignment{{RestaurantID: f.r1, AssignmentID: uid(65), AssignmentVersion: "1", Roles: []string{"Warehouse"}}, {RestaurantID: f.r2, AssignmentID: uid(66), AssignmentVersion: "1", Roles: []string{"Waiter"}}}, State: "active"}, domain.Membership{MembershipID: uid(67), MembershipVersion: "1", UserID: a.Users[0].UserID, OrgID: f.otherOrg, OrgRoles: []string{"Admin"}, Assignments: []domain.Assignment{}, State: "active"}, domain.Membership{MembershipID: uid(68), MembershipVersion: "1", UserID: uid(51), OrgID: f.otherOrg, OrgRoles: []string{}, Assignments: []domain.Assignment{{RestaurantID: f.r3, AssignmentID: uid(69), AssignmentVersion: "1", Roles: []string{"Waiter"}}}, State: "active"})
 	f.path = filepath.Join(t.TempDir(), "auth.json")
 	var err error
-	f.store, err = jsonstore.Initialize(ctx, f.path, validate(t, a))
+	physical := &clock{at: time.Date(2026, 10, 13, 1, 0, 0, 0, time.FixedZone("Europe/Moscow", 3*3600))}
+	f.store, err = jsonstore.Initialize(ctx, f.path, validate(t, a), jsonstore.WithClock(physical))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func membershipsSetup(t *testing.T) *membershipFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.opts = application.AccountOptions{Repository: f.store, Passwords: &mechanisms{}, Clock: &clock{at: time.Date(2026, 10, 13, 1, 0, 0, 0, time.FixedZone("Europe/Moscow", 3*3600))}, IDs: &mechanisms{}, Tokens: &mechanisms{}, Results: secrets}
+	f.opts = application.AccountOptions{Repository: f.store, Passwords: &mechanisms{}, Clock: physical, IDs: &mechanisms{}, Tokens: &mechanisms{}, Results: secrets}
 	m := &mechanisms{}
 	f.opts.Passwords = m
 	f.opts.IDs = m
@@ -262,7 +263,7 @@ func TestMembershipDurableRetryConflictAndRestart(t *testing.T) {
 	if err := f.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	f.store, err = jsonstore.Open(ctx, f.path)
+	f.store, err = jsonstore.Open(ctx, f.path, jsonstore.WithClock(f.opts.Clock))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +438,7 @@ func TestMembershipPersistenceFailureClassification(t *testing.T) {
 			if err := f.store.Close(); err != nil {
 				t.Fatal(err)
 			}
-			f.store, err = jsonstore.Open(ctx, f.path)
+			f.store, err = jsonstore.Open(ctx, f.path, jsonstore.WithClock(f.opts.Clock))
 			if err != nil {
 				t.Fatal(err)
 			}

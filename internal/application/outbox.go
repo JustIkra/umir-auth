@@ -192,6 +192,7 @@ func (s *Accounts) SweepEnrollment(ctx context.Context) error {
 		}
 		now := s.opts.Clock.Now()
 		changed := false
+		purge := purgeableChallenges(a, now)
 		for i := range a.Invitations {
 			v := &a.Invitations[i]
 			if v.State == "pending" && !before(now, v.ExpiresAt) {
@@ -216,6 +217,10 @@ func (s *Accounts) SweepEnrollment(ctx context.Context) error {
 				}
 			}
 		}
+		if len(purge) > 0 {
+			purgeChallenges(&a, purge)
+			changed = true
+		}
 		if !changed {
 			return nil
 		}
@@ -224,6 +229,64 @@ func (s *Accounts) SweepEnrollment(ctx context.Context) error {
 			continue
 		}
 		return err
+	}
+}
+
+// purgeableChallenges selects the challenges whose retention (domain.ChallengePurgeAt)
+// has ended and none of whose jobs can still send or be resolved. The state read
+// is the stored one: a job that this very pass suppresses is only dropped by the
+// next pass, because a replacement may not remove a live job.
+func purgeableChallenges(a domain.Aggregate, now time.Time) map[domain.EntityID]bool {
+	live := map[domain.EntityID]bool{}
+	for _, j := range a.MailJobs {
+		if domain.ChallengeJobLive(j) {
+			live[j.ChallengeID] = true
+		}
+	}
+	var purge map[domain.EntityID]bool
+	for _, c := range a.Challenges {
+		if !live[c.ChallengeID] && domain.ChallengePurgeable(c, now) {
+			if purge == nil {
+				purge = map[domain.EntityID]bool{}
+			}
+			purge[c.ChallengeID] = true
+		}
+	}
+	return purge
+}
+
+// purgeChallenges removes the challenges, their OTP jobs, and replaces the
+// challenge command records that pointed only at those jobs with tombstones, so
+// a repeat of such a command never runs again (C18, C29).
+func purgeChallenges(a *domain.Aggregate, purge map[domain.EntityID]bool) {
+	challenges := make([]domain.Challenge, 0, len(a.Challenges))
+	for _, c := range a.Challenges {
+		if !purge[c.ChallengeID] {
+			challenges = append(challenges, c)
+		}
+	}
+	a.Challenges = challenges
+	removed := map[domain.EntityID]bool{}
+	jobs := make([]domain.MailJob, 0, len(a.MailJobs))
+	for _, j := range a.MailJobs {
+		if purge[j.ChallengeID] && j.Purpose != "invitation_link" {
+			removed[j.JobID] = true
+			continue
+		}
+		jobs = append(jobs, j)
+	}
+	a.MailJobs = jobs
+	for i, r := range a.Idempotency {
+		if !domain.IsChallengeCommand(r.OperationID) || len(r.JobIDs) == 0 {
+			continue
+		}
+		gone := true
+		for _, id := range r.JobIDs {
+			gone = gone && removed[id]
+		}
+		if gone {
+			a.Idempotency[i] = domain.CommandTombstone(r)
+		}
 	}
 }
 func validateEnrollmentSecrets(a domain.Aggregate, secrets ChallengeSecrets, links InvitationURLPolicy) error {

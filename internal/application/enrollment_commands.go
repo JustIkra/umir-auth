@@ -64,20 +64,14 @@ func enrollmentCommand[T any](s *Accounts, ctx context.Context, actor ChallengeA
 			return zero, err
 		}
 		if err := access(a, who); err != nil {
+			if errors.Is(err, ErrChallengeUnavailable) && domain.IsChallengeCommand(operation) {
+				// The challenge may be gone together with its result: an exact
+				// repeat of its command must not be reported as an unknown challenge.
+				if cleared := s.clearedReplay(a, who, operation, org, command, input); cleared != nil {
+					return zero, cleared
+				}
+			}
 			return zero, err
-		}
-		encoded, err := json.Marshal(input)
-		if err != nil {
-			return zero, ErrAuthUnavailable
-		}
-		digest, err := s.opts.Results.Digest(encoded)
-		clear(encoded)
-		if err != nil {
-			return zero, ErrAuthUnavailable
-		}
-		initiator := who.initiator
-		if operation == "createInvitation" || operation == "cancelInvitation" || operation == "resendInvitation" || operation == "resendInvitationLink" {
-			initiator = ""
 		}
 		profile := "C2"
 		if operation == "createInvitation" || operation == "resendInvitationLink" {
@@ -89,21 +83,19 @@ func enrollmentCommand[T any](s *Accounts, ctx context.Context, actor ChallengeA
 				break
 			}
 		}
-		version := "1"
-		if profile == "UA1" {
-			version = "UA1"
-		}
-		tuple, err := json.Marshal(struct{ Version, Operation, Actor, Initiator, Org, Input string }{version, operation, string(who.user.UserID), initiator, string(org), digest})
+		fp, err := s.enrollmentFingerprint(who, operation, org, input, profile)
 		if err != nil {
-			return zero, ErrAuthUnavailable
+			return zero, err
 		}
-		fp := TokenDigest(string(tuple))
 		for _, r := range a.Idempotency {
 			if r.ActorID != who.user.UserID || r.PreauthDigest != who.preauth || r.OperationID != operation || r.OrgID != org || r.RestaurantID != "" || r.CommandID != command {
 				continue
 			}
 			if r.Fingerprint != fp {
 				return zero, ErrCommandConflict
+			}
+			if domain.IsCommandTombstone(r) {
+				return zero, ErrCommandResultCleared
 			}
 			plain, err := s.opts.Results.Open(r.EncryptedResponse)
 			if err != nil {
@@ -172,6 +164,54 @@ func enrollmentCommand[T any](s *Accounts, ctx context.Context, actor ChallengeA
 		}
 		return changed.value, nil
 	}
+}
+
+// enrollmentFingerprint is the fingerprint of one enrollment command: the same
+// subject, operation, scope and input digest always give the same value.
+func (s *Accounts) enrollmentFingerprint(who enrollmentActor, operation string, org domain.EntityID, input any, profile string) (string, error) {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return "", ErrAuthUnavailable
+	}
+	digest, err := s.opts.Results.Digest(encoded)
+	clear(encoded)
+	if err != nil {
+		return "", ErrAuthUnavailable
+	}
+	initiator := who.initiator
+	if operation == "createInvitation" || operation == "cancelInvitation" || operation == "resendInvitation" || operation == "resendInvitationLink" {
+		initiator = ""
+	}
+	version := "1"
+	if profile == "UA1" {
+		version = "UA1"
+	}
+	tuple, err := json.Marshal(struct{ Version, Operation, Actor, Initiator, Org, Input string }{version, operation, string(who.user.UserID), initiator, string(org), digest})
+	if err != nil {
+		return "", ErrAuthUnavailable
+	}
+	return TokenDigest(string(tuple)), nil
+}
+
+// clearedReplay answers a repeat of a challenge command whose result was removed
+// with its challenge: ErrCommandResultCleared for the same request,
+// ErrCommandConflict for a different one under the same key, nil when there is no
+// tombstone for the key.
+func (s *Accounts) clearedReplay(a domain.Aggregate, who enrollmentActor, operation string, org domain.EntityID, command string, input any) error {
+	for _, r := range a.Idempotency {
+		if r.ActorID != who.user.UserID || r.PreauthDigest != who.preauth || r.OperationID != operation || r.OrgID != org || r.RestaurantID != "" || r.CommandID != command || !domain.IsCommandTombstone(r) {
+			continue
+		}
+		fp, err := s.enrollmentFingerprint(who, operation, org, input, r.ContractProfile)
+		if err != nil {
+			return err
+		}
+		if r.Fingerprint != fp {
+			return ErrCommandConflict
+		}
+		return ErrCommandResultCleared
+	}
+	return nil
 }
 
 type enrollmentErrorResult struct {
