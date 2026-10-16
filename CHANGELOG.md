@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Treat an SMTP dial failure as a retryable delivery failure instead of an unknown outcome; failures after the connection is established stay unknown.
+
 - Verify an unknown login against a dummy verifier made by the selected hasher instead of the first account's stored verifier, so its cost no longer depends on that account's parameters.
 
 - Hash passwords outside the Accounts mutex for invited-user completion and password reset, as registration already did: the hash runs behind the bounded password gate after a read-only precheck, an exact repeat needs no hash, and the command re-checks proof, credentials and identity at commit time.

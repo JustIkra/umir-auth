@@ -120,7 +120,8 @@ func (s *SMTP) send(ctx context.Context, to string, message []byte) application.
 	conn, err := (&net.Dialer{Timeout: connectTimeout}).DialContext(dialCtx, "tcp", net.JoinHostPort(s.host, strconv.Itoa(s.port)))
 	dialCancel()
 	if err != nil {
-		return uncertainSMTP("smtp_transport_error")
+		// No connection exists, so nothing was sent: the job is retried.
+		return transientSMTP("smtp_connect_error")
 	}
 	rawConn := conn
 	defer closeQuietly(conn)
