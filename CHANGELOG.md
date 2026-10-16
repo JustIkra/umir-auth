@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Read the log `instance_id` from `AUTH_INSTANCE_ID` (C19); a random identifier is only the fallback when it is unset.
+
 - Retry the dummy verifier hash after a failure instead of caching the error until restart.
 
 - Stop the process when a request leaves Accounts in recovery (unknown update outcome): `Accounts.RecoveryPending` makes the worker supervisor treat the next worker error as unrecoverable, so the container restarts instead of staying alive and answering 503.

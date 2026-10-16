@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"time"
 
@@ -97,7 +98,7 @@ func Run(ctx context.Context, path string) (err error) {
 	if e != nil {
 		return e
 	}
-	instance, e := NewID()
+	instance, e := instanceID(os.Getenv("AUTH_INSTANCE_ID"))
 	if e != nil {
 		return e
 	}
@@ -172,6 +173,21 @@ func Run(ctx context.Context, path string) (err error) {
 	}
 	stage = "runtime"
 	return runtime.Serve(ctx, listener, handler, sender)
+}
+
+var instancePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+
+// instanceID is the log instance_id: the replica name the deployment sets in
+// AUTH_INSTANCE_ID (for example auth-a), or a random identifier of this process
+// when it is not set. A set but malformed value is a configuration error.
+func instanceID(configured string) (string, error) {
+	if configured == "" {
+		return NewID()
+	}
+	if !instancePattern.MatchString(configured) {
+		return "", errors.New("invalid AUTH_INSTANCE_ID")
+	}
+	return configured, nil
 }
 
 // buildVersion is the VCS revision of the build, or "dev" outside a VCS build.
