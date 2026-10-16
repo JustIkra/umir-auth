@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -58,5 +59,46 @@ func TestUnknownLoginDoesNotBorrowTheFirstAccountsVerifier(t *testing.T) {
 	}
 	if recorder.verifiers[0] != verifier {
 		t.Fatalf("unknown login verified against %q; want the selected hasher's own dummy", recorder.verifiers[0])
+	}
+}
+
+// flakyHasher fails its first Hash call.
+type flakyHasher struct {
+	*mechanisms
+	failed bool
+}
+
+func (h *flakyHasher) Hash(p string) (string, error) {
+	if !h.failed {
+		h.failed = true
+		return "", errors.New("synthetic hash failure")
+	}
+	return h.mechanisms.Hash(p)
+}
+
+// One failed hash of the dummy verifier must not make every later unknown login
+// fail until restart.
+func TestDummyVerifierFailureIsRetried(t *testing.T) {
+	a := fixture(t)
+	r, err := jsonstore.Initialize(ctx, filepath.Join(t.TempDir(), "auth.json"), validate(t, a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := r.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	m := &mechanisms{}
+	c := &clock{at: time.Date(2026, 10, 13, 1, 0, 0, 0, time.FixedZone("Europe/Moscow", 3*3600))}
+	s, err := application.NewAccounts(ctx, application.AccountOptions{Repository: r, Passwords: &flakyHasher{mechanisms: m}, Clock: c, IDs: m, Tokens: m})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Login(ctx, application.LoginInput{Login: "nobody", Password: "password"}); !errors.Is(err, application.ErrAuthUnavailable) {
+		t.Fatalf("first unknown login with a failing hasher = %v", err)
+	}
+	if _, err := s.Login(ctx, application.LoginInput{Login: "nobody-else", Password: "password"}); !errors.Is(err, application.ErrInvalidCredentials) {
+		t.Fatalf("a later unknown login = %v; want the ordinary refusal", err)
 	}
 }

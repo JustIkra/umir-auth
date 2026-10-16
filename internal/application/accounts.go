@@ -68,16 +68,23 @@ type Accounts struct {
 // that of a known login under the current parameters and never depends on the
 // stored parameters of any real account.
 type dummyVerifier struct {
-	once  sync.Once
+	mu    sync.Mutex
 	value string
-	err   error
 }
 
+// dummyVerifier returns the cached dummy, hashing it on first use. A failed hash is
+// not cached: the next unknown login tries again.
 func (s *Accounts) dummyVerifier() (string, error) {
-	s.dummy.once.Do(func() {
-		s.dummy.value, s.dummy.err = s.opts.Passwords.Hash("umir-auth unknown-login equalizer")
-	})
-	return s.dummy.value, s.dummy.err
+	s.dummy.mu.Lock()
+	defer s.dummy.mu.Unlock()
+	if s.dummy.value == "" {
+		hash, err := s.opts.Passwords.Hash("umir-auth unknown-login equalizer")
+		if err != nil {
+			return "", err
+		}
+		s.dummy.value = hash
+	}
+	return s.dummy.value, nil
 }
 
 var (
@@ -177,6 +184,7 @@ func NewAccounts(ctx context.Context, o AccountOptions) (*Accounts, error) {
 	}
 	return s, nil
 }
+
 // setRecovering records, under s.mu, that the stored state is in doubt: every
 // later request fails until the process restarts and reloads it.
 func (s *Accounts) setRecovering() {
