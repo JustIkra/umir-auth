@@ -16,11 +16,12 @@ type Store struct {
 	commands    map[application.CommandKey]domain.IdempotencyRecord
 	orgs        map[domain.EntityID]domain.Organization
 	restaurants map[domain.EntityID]domain.Restaurant
+	memberships map[domain.EntityID]domain.Membership
 	revision    domain.Version
 }
 
 func New() *Store {
-	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), revision: "1"}
+	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), revision: "1"}
 }
 
 func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(application.Tx) error) (application.CommitResult, error) {
@@ -38,7 +39,8 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	commands := cloneCommands(s.commands)
 	orgs := cloneOrganizations(s.orgs)
 	restaurants := cloneRestaurants(s.restaurants)
-	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants}
+	memberships := cloneMemberships(s.memberships)
+	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships}
 	if err := fn(tx); err != nil {
 		return application.CommitResult{Outcome: application.NotCommitted}, err
 	}
@@ -51,6 +53,7 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	s.commands = commands
 	s.orgs = orgs
 	s.restaurants = restaurants
+	s.memberships = memberships
 	return application.CommitResult{Outcome: application.Committed, AggregateRevision: s.revision}, nil
 }
 
@@ -63,7 +66,7 @@ func (s *Store) View(ctx context.Context, scope application.Scope, fn func(appli
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants})
+	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships})
 }
 
 type reader struct {
@@ -72,6 +75,7 @@ type reader struct {
 	commands    map[application.CommandKey]domain.IdempotencyRecord
 	orgs        map[domain.EntityID]domain.Organization
 	restaurants map[domain.EntityID]domain.Restaurant
+	memberships map[domain.EntityID]domain.Membership
 }
 
 func (r reader) Users() application.UserReader { return userReader{users: r.users} }
@@ -85,6 +89,9 @@ func (r reader) Organizations() application.OrganizationReader {
 func (r reader) Restaurants() application.RestaurantReader {
 	return restaurantReader{orgs: r.orgs, restaurants: r.restaurants}
 }
+func (r reader) Memberships() application.MembershipReader {
+	return membershipReader{memberships: r.memberships}
+}
 
 type transaction struct {
 	users       map[domain.EntityID]domain.User
@@ -92,6 +99,7 @@ type transaction struct {
 	commands    map[application.CommandKey]domain.IdempotencyRecord
 	orgs        map[domain.EntityID]domain.Organization
 	restaurants map[domain.EntityID]domain.Restaurant
+	memberships map[domain.EntityID]domain.Membership
 }
 
 func (t transaction) Users() application.UserRepository {
@@ -110,6 +118,9 @@ func (t transaction) Organizations() application.OrganizationRepository {
 }
 func (t transaction) Restaurants() application.RestaurantRepository {
 	return restaurantRepository{restaurantReader{orgs: t.orgs, restaurants: t.restaurants}}
+}
+func (t transaction) Memberships() application.MembershipRepository {
+	return membershipRepository{users: t.users, orgs: t.orgs, restaurants: t.restaurants, memberships: t.memberships}
 }
 
 type userReader struct {
@@ -301,6 +312,76 @@ func (r restaurantRepository) Insert(ctx context.Context, restaurant domain.Rest
 	return nil
 }
 
+type membershipReader struct {
+	memberships map[domain.EntityID]domain.Membership
+}
+
+func (r membershipReader) Get(ctx context.Context, id domain.EntityID) (domain.Membership, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Membership{}, false, err
+	}
+	membership, ok := r.memberships[id]
+	return cloneMembership(membership), ok, nil
+}
+
+func (r membershipReader) ForUserInOrganization(ctx context.Context, userID, orgID domain.EntityID) (domain.Membership, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Membership{}, false, err
+	}
+	for _, membership := range r.memberships {
+		if membership.UserID == userID && membership.OrgID == orgID {
+			return cloneMembership(membership), true, nil
+		}
+	}
+	return domain.Membership{}, false, nil
+}
+
+type membershipRepository struct {
+	users       map[domain.EntityID]domain.User
+	orgs        map[domain.EntityID]domain.Organization
+	restaurants map[domain.EntityID]domain.Restaurant
+	memberships map[domain.EntityID]domain.Membership
+}
+
+func (r membershipRepository) Get(ctx context.Context, id domain.EntityID) (domain.Membership, bool, error) {
+	return (membershipReader{memberships: r.memberships}).Get(ctx, id)
+}
+
+func (r membershipRepository) ForUserInOrganization(ctx context.Context, userID, orgID domain.EntityID) (domain.Membership, bool, error) {
+	return (membershipReader{memberships: r.memberships}).ForUserInOrganization(ctx, userID, orgID)
+}
+
+func (r membershipRepository) Insert(ctx context.Context, membership domain.Membership) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if membership.MembershipID == "" || r.memberships[membership.MembershipID].MembershipID != "" {
+		return application.ErrEntityConflict
+	}
+	if _, ok := r.users[membership.UserID]; !ok {
+		return application.ErrReferenceMissing
+	}
+	if _, ok := r.orgs[membership.OrgID]; !ok {
+		return application.ErrReferenceMissing
+	}
+	for _, existing := range r.memberships {
+		if existing.UserID == membership.UserID && existing.OrgID == membership.OrgID {
+			return application.ErrEntityConflict
+		}
+	}
+	for _, assignment := range membership.Assignments {
+		restaurant, ok := r.restaurants[assignment.RestaurantID]
+		if !ok {
+			return application.ErrReferenceMissing
+		}
+		if restaurant.OrgID != membership.OrgID {
+			return application.ErrScopeMismatch
+		}
+	}
+	r.memberships[membership.MembershipID] = cloneMembership(membership)
+	return nil
+}
+
 func check(ctx context.Context, scope application.Scope) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -352,6 +433,23 @@ func cloneRestaurants(restaurants map[domain.EntityID]domain.Restaurant) map[dom
 		copyOf[id] = restaurant
 	}
 	return copyOf
+}
+
+func cloneMemberships(memberships map[domain.EntityID]domain.Membership) map[domain.EntityID]domain.Membership {
+	copyOf := make(map[domain.EntityID]domain.Membership, len(memberships))
+	for id, membership := range memberships {
+		copyOf[id] = cloneMembership(membership)
+	}
+	return copyOf
+}
+
+func cloneMembership(membership domain.Membership) domain.Membership {
+	membership.OrgRoles = append([]string(nil), membership.OrgRoles...)
+	membership.Assignments = append([]domain.Assignment(nil), membership.Assignments...)
+	for i := range membership.Assignments {
+		membership.Assignments[i].Roles = append([]string(nil), membership.Assignments[i].Roles...)
+	}
+	return membership
 }
 
 var _ application.Store = (*Store)(nil)

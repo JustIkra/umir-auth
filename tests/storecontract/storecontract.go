@@ -113,6 +113,33 @@ func Run[T application.Store](t *testing.T, newStore func() T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("membership assignment organization scope", func(t *testing.T) {
+		store := newStore()
+		ctx := context.Background()
+		scope := application.Scope{Actor: application.ActorSystem}
+		orgA := domain.Organization{OrgID: "org-a", Name: "A", Lifecycle: "active", LifecycleVersion: "1"}
+		orgB := domain.Organization{OrgID: "org-b", Name: "B", Lifecycle: "active", LifecycleVersion: "1"}
+		restaurantB := domain.Restaurant{RestaurantID: "restaurant-b", OrgID: orgB.OrgID, Name: "B", Lifecycle: "ready", LifecycleVersion: "1"}
+		membership := domain.Membership{MembershipID: "membership-a", MembershipVersion: "1", UserID: "user-a", OrgID: orgA.OrgID, Assignments: []domain.Assignment{{RestaurantID: restaurantB.RestaurantID, AssignmentID: "assignment-a", AssignmentVersion: "1", Roles: []string{"Waiter"}}}, State: "active"}
+		_, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+			if err := tx.Organizations().Insert(ctx, orgA); err != nil {
+				return err
+			}
+			if err := tx.Organizations().Insert(ctx, orgB); err != nil {
+				return err
+			}
+			if err := tx.Restaurants().Insert(ctx, restaurantB); err != nil {
+				return err
+			}
+			if err := tx.Users().Insert(ctx, domain.User{UserID: membership.UserID, Login: "owner@example.invalid"}); err != nil {
+				return err
+			}
+			return tx.Memberships().Insert(ctx, membership)
+		})
+		if !errors.Is(err, application.ErrScopeMismatch) {
+			t.Fatalf("cross-organization assignment was accepted: %v", err)
+		}
+	})
 }
 
 func checkFailedTransactionRollsBack(t *testing.T, store application.Store) {

@@ -41,6 +41,7 @@ var (
 	ErrInvalidCommand   = errors.New("invalid auth command identity")
 	ErrReferenceMissing = errors.New("auth entity reference missing")
 	ErrInvalidScope     = errors.New("invalid auth storage scope")
+	ErrScopeMismatch    = errors.New("auth entity scope mismatch")
 )
 
 type Store interface {
@@ -54,6 +55,7 @@ type Reader interface {
 	Commands() CommandReader
 	Organizations() OrganizationReader
 	Restaurants() RestaurantReader
+	Memberships() MembershipReader
 }
 
 type Tx interface {
@@ -62,6 +64,7 @@ type Tx interface {
 	Commands() CommandRepository
 	Organizations() OrganizationRepository
 	Restaurants() RestaurantRepository
+	Memberships() MembershipRepository
 }
 
 type UserReader interface {
@@ -110,4 +113,14 @@ type RestaurantReader interface {
 type RestaurantRepository interface {
 	RestaurantReader
 	Insert(context.Context, domain.Restaurant) error
+}
+
+type MembershipReader interface {
+	Get(context.Context, domain.EntityID) (domain.Membership, bool, error)
+	ForUserInOrganization(context.Context, domain.EntityID, domain.EntityID) (domain.Membership, bool, error)
+}
+
+type MembershipRepository interface {
+	MembershipReader
+	Insert(context.Context, domain.Membership) error
 }
