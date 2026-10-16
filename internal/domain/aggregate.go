@@ -36,6 +36,8 @@ type Settings struct {
 	SettingsVersion Version `json:"settingsVersion"`
 }
 type Organization struct {
+	CreatedBy        EntityID `json:"createdBy,omitempty"`
+	CreatedAt        Instant  `json:"createdAt,omitempty"`
 	OrgID            EntityID `json:"orgID"`
 	Name             string   `json:"name"`
 	Settings         Settings `json:"settings"`

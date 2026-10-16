@@ -59,7 +59,7 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	lifecycle := cloneLifecycle(s.lifecycle)
 	tombstones := cloneTombstones(s.tombstones)
 	registryRevision := s.registryRevision
-	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges, mailJobs: mailJobs, budgetEvents: &budgetEvents, outbox: outbox, lifecycle: lifecycle, tombstones: tombstones, registryRevision: &registryRevision}
+	tx := transaction{scope: scope, users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges, mailJobs: mailJobs, budgetEvents: &budgetEvents, outbox: outbox, lifecycle: lifecycle, tombstones: tombstones, registryRevision: &registryRevision}
 	if err := fn(tx); err != nil {
 		return application.CommitResult{Outcome: application.NotCommitted}, err
 	}
@@ -100,10 +100,11 @@ func (s *Store) View(ctx context.Context, scope application.Scope, fn func(appli
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges, mailJobs: s.mailJobs, budgetEvents: s.budgetEvents, outbox: s.outbox, lifecycle: s.lifecycle, tombstones: s.tombstones, registryRevision: s.registryRevision})
+	return fn(reader{scope: scope, users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges, mailJobs: s.mailJobs, budgetEvents: s.budgetEvents, outbox: s.outbox, lifecycle: s.lifecycle, tombstones: s.tombstones, registryRevision: s.registryRevision})
 }
 
 type reader struct {
+	scope            application.Scope
 	users            map[domain.EntityID]domain.User
 	sessions         map[domain.EntityID]domain.Session
 	commands         map[application.CommandKey]domain.IdempotencyRecord
@@ -120,37 +121,40 @@ type reader struct {
 	registryRevision domain.Version
 }
 
-func (r reader) Users() application.UserReader { return userReader{users: r.users} }
+func (r reader) Users() application.UserReader { return userReader{users: r.users, scope: r.scope} }
 func (r reader) Sessions() application.SessionReader {
-	return sessionReader{users: r.users, sessions: r.sessions}
+	return sessionReader{users: r.users, sessions: r.sessions, scope: r.scope}
 }
 func (r reader) Commands() application.CommandReader { return commandReader{commands: r.commands} }
 func (r reader) Organizations() application.OrganizationReader {
-	return organizationReader{orgs: r.orgs}
+	return organizationReader{orgs: r.orgs, scope: r.scope}
 }
 func (r reader) Restaurants() application.RestaurantReader {
-	return restaurantReader{orgs: r.orgs, restaurants: r.restaurants}
+	return restaurantReader{orgs: r.orgs, restaurants: r.restaurants, scope: r.scope}
 }
 func (r reader) Memberships() application.MembershipReader {
-	return membershipReader{memberships: r.memberships}
+	return membershipReader{memberships: r.memberships, scope: r.scope}
 }
 func (r reader) Invitations() application.InvitationReader {
-	return invitationReader{orgs: r.orgs, restaurants: r.restaurants, invitations: r.invitations}
+	return invitationReader{orgs: r.orgs, restaurants: r.restaurants, invitations: r.invitations, scope: r.scope}
 }
 func (r reader) Challenges() application.ChallengeReader {
 	return challengeReader{challenges: r.challenges}
 }
 func (r reader) MailJobs() application.MailJobReader { return mailJobReader{mailJobs: r.mailJobs} }
 func (r reader) Budgets() application.BudgetReader   { return budgetReader{events: r.budgetEvents} }
-func (r reader) Outbox() application.OutboxReader    { return outboxRepository{events: r.outbox} }
+func (r reader) Outbox() application.OutboxReader {
+	return outboxRepository{events: r.outbox, scope: r.scope}
+}
 func (r reader) Lifecycle() application.LifecycleReader {
-	return lifecycleRepository{restaurants: r.restaurants, orgs: r.orgs, lifecycle: r.lifecycle, tombstones: r.tombstones}
+	return lifecycleRepository{restaurants: r.restaurants, orgs: r.orgs, lifecycle: r.lifecycle, tombstones: r.tombstones, scope: r.scope}
 }
 func (r reader) Registry() application.RegistryReader {
-	return registryRepository{restaurants: r.restaurants, orgs: r.orgs, revision: r.registryRevision}
+	return registryRepository{restaurants: r.restaurants, orgs: r.orgs, revision: r.registryRevision, scope: r.scope}
 }
 
 type transaction struct {
+	scope            application.Scope
 	users            map[domain.EntityID]domain.User
 	sessions         map[domain.EntityID]domain.Session
 	commands         map[application.CommandKey]domain.IdempotencyRecord
@@ -168,27 +172,27 @@ type transaction struct {
 }
 
 func (t transaction) Users() application.UserRepository {
-	return userRepository{userReader{users: t.users}}
+	return userRepository{userReader{users: t.users, scope: t.scope}}
 }
 
 func (t transaction) Sessions() application.SessionRepository {
-	return sessionRepository{sessionReader{users: t.users, sessions: t.sessions}}
+	return sessionRepository{sessionReader{users: t.users, sessions: t.sessions, scope: t.scope}}
 }
 
 func (t transaction) Commands() application.CommandRepository {
 	return commandRepository{commandReader{commands: t.commands}}
 }
 func (t transaction) Organizations() application.OrganizationRepository {
-	return organizationRepository{organizationReader{orgs: t.orgs}}
+	return organizationRepository{organizationReader{orgs: t.orgs, scope: t.scope}}
 }
 func (t transaction) Restaurants() application.RestaurantRepository {
-	return restaurantRepository{restaurantReader{orgs: t.orgs, restaurants: t.restaurants}}
+	return restaurantRepository{restaurantReader{orgs: t.orgs, restaurants: t.restaurants, scope: t.scope}}
 }
 func (t transaction) Memberships() application.MembershipRepository {
-	return membershipRepository{users: t.users, orgs: t.orgs, restaurants: t.restaurants, memberships: t.memberships}
+	return membershipRepository{users: t.users, orgs: t.orgs, restaurants: t.restaurants, memberships: t.memberships, scope: t.scope}
 }
 func (t transaction) Invitations() application.InvitationRepository {
-	return invitationRepository{invitationReader{orgs: t.orgs, restaurants: t.restaurants, invitations: t.invitations}}
+	return invitationRepository{invitationReader{orgs: t.orgs, restaurants: t.restaurants, invitations: t.invitations, scope: t.scope}}
 }
 func (t transaction) Challenges() application.ChallengeRepository {
 	return challengeRepository{challengeReader{challenges: t.challenges}}
@@ -199,21 +203,27 @@ func (t transaction) MailJobs() application.MailJobRepository {
 func (t transaction) Budgets() application.BudgetRepository {
 	return budgetRepository{budgetReader{events: *t.budgetEvents}, t.budgetEvents}
 }
-func (t transaction) Outbox() application.OutboxRepository { return outboxRepository{events: t.outbox} }
+func (t transaction) Outbox() application.OutboxRepository {
+	return outboxRepository{events: t.outbox, scope: t.scope}
+}
 func (t transaction) Lifecycle() application.LifecycleRepository {
-	return lifecycleRepository{restaurants: t.restaurants, orgs: t.orgs, lifecycle: t.lifecycle, tombstones: t.tombstones}
+	return lifecycleRepository{restaurants: t.restaurants, orgs: t.orgs, lifecycle: t.lifecycle, tombstones: t.tombstones, scope: t.scope}
 }
 func (t transaction) Registry() application.RegistryRepository {
-	return registryRepository{restaurants: t.restaurants, orgs: t.orgs, revision: *t.registryRevision, writable: t.registryRevision}
+	return registryRepository{restaurants: t.restaurants, orgs: t.orgs, revision: *t.registryRevision, writable: t.registryRevision, scope: t.scope}
 }
 
 type userReader struct {
 	users map[domain.EntityID]domain.User
+	scope application.Scope
 }
 
 func (r userReader) Get(ctx context.Context, id domain.EntityID) (domain.User, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.User{}, false, err
+	}
+	if !canReadUser(r.scope, id) {
+		return domain.User{}, false, nil
 	}
 	user, ok := r.users[id]
 	return user, ok, nil
@@ -240,6 +250,7 @@ func (r userRepository) Insert(ctx context.Context, user domain.User) error {
 type sessionReader struct {
 	users    map[domain.EntityID]domain.User
 	sessions map[domain.EntityID]domain.Session
+	scope    application.Scope
 }
 
 func (r sessionReader) Get(ctx context.Context, id domain.EntityID) (domain.Session, bool, error) {
@@ -247,6 +258,9 @@ func (r sessionReader) Get(ctx context.Context, id domain.EntityID) (domain.Sess
 		return domain.Session{}, false, err
 	}
 	session, ok := r.sessions[id]
+	if ok && !canReadUser(r.scope, session.UserID) {
+		return domain.Session{}, false, nil
+	}
 	return session, ok, nil
 }
 
@@ -256,6 +270,9 @@ func (r sessionReader) ByDigest(ctx context.Context, digest string) (domain.Sess
 	}
 	for _, session := range r.sessions {
 		if session.Digest == digest {
+			if !canReadUser(r.scope, session.UserID) {
+				continue
+			}
 			return session, true, nil
 		}
 	}
@@ -268,7 +285,7 @@ func (r sessionReader) ForUser(ctx context.Context, userID domain.EntityID) ([]d
 	}
 	var sessions []domain.Session
 	for _, session := range r.sessions {
-		if session.UserID == userID {
+		if session.UserID == userID && canReadUser(r.scope, session.UserID) {
 			sessions = append(sessions, session)
 		}
 	}
@@ -330,7 +347,8 @@ func (r commandRepository) Insert(ctx context.Context, record domain.Idempotency
 }
 
 type organizationReader struct {
-	orgs map[domain.EntityID]domain.Organization
+	orgs  map[domain.EntityID]domain.Organization
+	scope application.Scope
 }
 
 func (r organizationReader) Get(ctx context.Context, id domain.EntityID) (domain.Organization, bool, error) {
@@ -338,6 +356,9 @@ func (r organizationReader) Get(ctx context.Context, id domain.EntityID) (domain
 		return domain.Organization{}, false, err
 	}
 	org, ok := r.orgs[id]
+	if ok && !canReadOrganization(r.scope, org.OrgID) {
+		return domain.Organization{}, false, nil
+	}
 	return org, ok, nil
 }
 
@@ -347,7 +368,10 @@ func (r organizationRepository) Insert(ctx context.Context, org domain.Organizat
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if org.OrgID == "" || r.orgs[org.OrgID].OrgID != "" {
+	if org.OrgID == "" || !canWriteOrganization(r.scope, org.OrgID) {
+		return application.ErrScopeMismatch
+	}
+	if r.orgs[org.OrgID].OrgID != "" {
 		return application.ErrEntityConflict
 	}
 	r.orgs[org.OrgID] = org
@@ -357,6 +381,7 @@ func (r organizationRepository) Insert(ctx context.Context, org domain.Organizat
 type restaurantReader struct {
 	orgs        map[domain.EntityID]domain.Organization
 	restaurants map[domain.EntityID]domain.Restaurant
+	scope       application.Scope
 }
 
 func (r restaurantReader) Get(ctx context.Context, id domain.EntityID) (domain.Restaurant, bool, error) {
@@ -364,6 +389,9 @@ func (r restaurantReader) Get(ctx context.Context, id domain.EntityID) (domain.R
 		return domain.Restaurant{}, false, err
 	}
 	restaurant, ok := r.restaurants[id]
+	if ok && !canReadRestaurant(r.scope, restaurant) {
+		return domain.Restaurant{}, false, nil
+	}
 	return restaurant, ok, nil
 }
 
@@ -373,7 +401,7 @@ func (r restaurantReader) ForOrganization(ctx context.Context, orgID domain.Enti
 	}
 	var restaurants []domain.Restaurant
 	for _, restaurant := range r.restaurants {
-		if restaurant.OrgID == orgID {
+		if restaurant.OrgID == orgID && canReadRestaurant(r.scope, restaurant) {
 			restaurants = append(restaurants, restaurant)
 		}
 	}
@@ -386,7 +414,10 @@ func (r restaurantRepository) Insert(ctx context.Context, restaurant domain.Rest
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if restaurant.RestaurantID == "" || r.restaurants[restaurant.RestaurantID].RestaurantID != "" {
+	if restaurant.RestaurantID == "" || !canWriteOrganization(r.scope, restaurant.OrgID) || (r.scope.RestaurantID != "" && r.scope.RestaurantID != restaurant.RestaurantID) {
+		return application.ErrScopeMismatch
+	}
+	if r.restaurants[restaurant.RestaurantID].RestaurantID != "" {
 		return application.ErrEntityConflict
 	}
 	if _, ok := r.orgs[restaurant.OrgID]; !ok {
@@ -398,6 +429,7 @@ func (r restaurantRepository) Insert(ctx context.Context, restaurant domain.Rest
 
 type membershipReader struct {
 	memberships map[domain.EntityID]domain.Membership
+	scope       application.Scope
 }
 
 func (r membershipReader) Get(ctx context.Context, id domain.EntityID) (domain.Membership, bool, error) {
@@ -405,6 +437,9 @@ func (r membershipReader) Get(ctx context.Context, id domain.EntityID) (domain.M
 		return domain.Membership{}, false, err
 	}
 	membership, ok := r.memberships[id]
+	if ok && !canReadMembership(r.scope, membership) {
+		return domain.Membership{}, false, nil
+	}
 	return cloneMembership(membership), ok, nil
 }
 
@@ -413,7 +448,7 @@ func (r membershipReader) ForUserInOrganization(ctx context.Context, userID, org
 		return domain.Membership{}, false, err
 	}
 	for _, membership := range r.memberships {
-		if membership.UserID == userID && membership.OrgID == orgID {
+		if membership.UserID == userID && membership.OrgID == orgID && canReadMembership(r.scope, membership) {
 			return cloneMembership(membership), true, nil
 		}
 	}
@@ -425,14 +460,15 @@ type membershipRepository struct {
 	orgs        map[domain.EntityID]domain.Organization
 	restaurants map[domain.EntityID]domain.Restaurant
 	memberships map[domain.EntityID]domain.Membership
+	scope       application.Scope
 }
 
 func (r membershipRepository) Get(ctx context.Context, id domain.EntityID) (domain.Membership, bool, error) {
-	return (membershipReader{memberships: r.memberships}).Get(ctx, id)
+	return (membershipReader{memberships: r.memberships, scope: r.scope}).Get(ctx, id)
 }
 
 func (r membershipRepository) ForUserInOrganization(ctx context.Context, userID, orgID domain.EntityID) (domain.Membership, bool, error) {
-	return (membershipReader{memberships: r.memberships}).ForUserInOrganization(ctx, userID, orgID)
+	return (membershipReader{memberships: r.memberships, scope: r.scope}).ForUserInOrganization(ctx, userID, orgID)
 }
 
 func (r membershipRepository) Insert(ctx context.Context, membership domain.Membership) error {
@@ -441,6 +477,9 @@ func (r membershipRepository) Insert(ctx context.Context, membership domain.Memb
 	}
 	if membership.MembershipID == "" || r.memberships[membership.MembershipID].MembershipID != "" {
 		return application.ErrEntityConflict
+	}
+	if !canWriteOrganization(r.scope, membership.OrgID) || (r.scope.Actor == application.ActorUser && membership.UserID != r.scope.UserID) {
+		return application.ErrScopeMismatch
 	}
 	if _, ok := r.users[membership.UserID]; !ok {
 		return application.ErrReferenceMissing
@@ -471,11 +510,46 @@ func check(ctx context.Context, scope application.Scope) error {
 		return err
 	}
 	switch scope.Actor {
-	case application.ActorTenant, application.ActorUser, application.ActorAnonymous, application.ActorSystem:
-		return nil
+	case application.ActorTenant:
+		if scope.OrgID == "" || scope.UserID != "" {
+			return application.ErrInvalidScope
+		}
+	case application.ActorUser:
+		if scope.UserID == "" {
+			return application.ErrInvalidScope
+		}
+	case application.ActorAnonymous:
+		if scope.OrgID != "" || scope.RestaurantID != "" || scope.UserID != "" {
+			return application.ErrInvalidScope
+		}
+	case application.ActorSystem:
+		if scope.OrgID != "" || scope.RestaurantID != "" || scope.UserID != "" {
+			return application.ErrInvalidScope
+		}
 	default:
 		return application.ErrInvalidScope
 	}
+	return nil
+}
+
+func canReadUser(scope application.Scope, userID domain.EntityID) bool {
+	return scope.Actor == application.ActorSystem || (scope.Actor == application.ActorUser && scope.UserID == userID) || scope.Actor == application.ActorAnonymous
+}
+
+func canReadOrganization(scope application.Scope, orgID domain.EntityID) bool {
+	return scope.Actor == application.ActorSystem || scope.Actor == application.ActorTenant && scope.OrgID == orgID
+}
+
+func canWriteOrganization(scope application.Scope, orgID domain.EntityID) bool {
+	return scope.Actor == application.ActorSystem || scope.Actor == application.ActorTenant && scope.OrgID == orgID
+}
+
+func canReadRestaurant(scope application.Scope, restaurant domain.Restaurant) bool {
+	return canReadOrganization(scope, restaurant.OrgID) && (scope.RestaurantID == "" || scope.RestaurantID == restaurant.RestaurantID)
+}
+
+func canReadMembership(scope application.Scope, membership domain.Membership) bool {
+	return scope.Actor == application.ActorSystem || scope.Actor == application.ActorTenant && scope.OrgID == membership.OrgID || scope.Actor == application.ActorUser && scope.UserID == membership.UserID
 }
 
 func cloneUsers(users map[domain.EntityID]domain.User) map[domain.EntityID]domain.User {
@@ -540,6 +614,7 @@ type invitationReader struct {
 	orgs        map[domain.EntityID]domain.Organization
 	restaurants map[domain.EntityID]domain.Restaurant
 	invitations map[domain.EntityID]domain.Invitation
+	scope       application.Scope
 }
 
 func (r invitationReader) Get(ctx context.Context, id domain.EntityID) (domain.Invitation, bool, error) {
@@ -547,6 +622,9 @@ func (r invitationReader) Get(ctx context.Context, id domain.EntityID) (domain.I
 		return domain.Invitation{}, false, err
 	}
 	invitation, ok := r.invitations[id]
+	if ok && !canReadOrganization(r.scope, invitation.OrgID) {
+		return domain.Invitation{}, false, nil
+	}
 	return cloneInvitation(invitation), ok, nil
 }
 
@@ -556,7 +634,7 @@ func (r invitationReader) ForOrganization(ctx context.Context, orgID domain.Enti
 	}
 	var invitations []domain.Invitation
 	for _, invitation := range r.invitations {
-		if invitation.OrgID == orgID {
+		if invitation.OrgID == orgID && canReadOrganization(r.scope, orgID) {
 			invitations = append(invitations, cloneInvitation(invitation))
 		}
 	}
@@ -569,7 +647,7 @@ func (r invitationReader) PendingByEmail(ctx context.Context, orgID domain.Entit
 	}
 	key := strings.ToLower(email)
 	for _, invitation := range r.invitations {
-		if invitation.OrgID == orgID && invitation.State == "pending" && strings.ToLower(invitation.ComparisonEmail) == key {
+		if invitation.OrgID == orgID && canReadOrganization(r.scope, orgID) && invitation.State == "pending" && strings.ToLower(invitation.ComparisonEmail) == key {
 			return cloneInvitation(invitation), true, nil
 		}
 	}
@@ -584,6 +662,9 @@ func (r invitationRepository) Insert(ctx context.Context, invitation domain.Invi
 	}
 	if invitation.InvitationID == "" || r.invitations[invitation.InvitationID].InvitationID != "" {
 		return application.ErrEntityConflict
+	}
+	if !canWriteOrganization(r.scope, invitation.OrgID) {
+		return application.ErrScopeMismatch
 	}
 	if _, ok := r.orgs[invitation.OrgID]; !ok {
 		return application.ErrReferenceMissing
@@ -766,6 +847,7 @@ func cloneMailJobs(mailJobs map[domain.EntityID]domain.MailJob) map[domain.Entit
 
 type outboxRepository struct {
 	events map[domain.EntityID]application.OutboxEvent
+	scope  application.Scope
 }
 
 func (r outboxRepository) Get(ctx context.Context, id domain.EntityID) (application.OutboxEvent, bool, error) {
@@ -773,6 +855,9 @@ func (r outboxRepository) Get(ctx context.Context, id domain.EntityID) (applicat
 		return application.OutboxEvent{}, false, err
 	}
 	event, ok := r.events[id]
+	if ok && !canReadOutbox(r.scope, event) {
+		return application.OutboxEvent{}, false, nil
+	}
 	return cloneOutboxEvent(event), ok, nil
 }
 
@@ -783,11 +868,31 @@ func (r outboxRepository) Insert(ctx context.Context, event application.OutboxEv
 	if err := event.Validate(); err != nil {
 		return "", err
 	}
+	if !canWriteOutbox(r.scope, event) {
+		return "", application.ErrScopeMismatch
+	}
 	if _, ok := r.events[event.ID]; ok {
 		return "", application.ErrEntityConflict
 	}
 	r.events[event.ID] = cloneOutboxEvent(event)
 	return event.ID, nil
+}
+
+func canReadOutbox(scope application.Scope, event application.OutboxEvent) bool {
+	if scope.Actor == application.ActorSystem {
+		return true
+	}
+	return scope.Actor == application.ActorTenant && scope.OrgID == event.OrgID && ((scope.RestaurantID == "" && event.RestaurantID == "") || scope.RestaurantID == event.RestaurantID)
+}
+
+func canWriteOutbox(scope application.Scope, event application.OutboxEvent) bool {
+	if scope.Actor == application.ActorSystem {
+		return true
+	}
+	if scope.Actor == application.ActorTenant {
+		return canReadOutbox(scope, event)
+	}
+	return scope.Actor == application.ActorAnonymous && event.OrgID == "" && event.RestaurantID == "" && event.Exchange == "umir.tasks" && event.RoutingKey == "auth.mail"
 }
 
 func cloneOutbox(events map[domain.EntityID]application.OutboxEvent) map[domain.EntityID]application.OutboxEvent {
@@ -815,6 +920,7 @@ type lifecycleRepository struct {
 	orgs        map[domain.EntityID]domain.Organization
 	lifecycle   map[domain.EntityID]domain.LifecycleIntent
 	tombstones  map[domain.EntityID]domain.Tombstone
+	scope       application.Scope
 }
 
 type registryRepository struct {
@@ -822,11 +928,15 @@ type registryRepository struct {
 	orgs        map[domain.EntityID]domain.Organization
 	revision    domain.Version
 	writable    *domain.Version
+	scope       application.Scope
 }
 
 func (r registryRepository) Revision(ctx context.Context) (domain.Version, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
+	}
+	if r.scope.Actor != application.ActorSystem {
+		return "", application.ErrScopeMismatch
 	}
 	return r.revision, nil
 }
@@ -835,7 +945,7 @@ func (r registryRepository) Touch(ctx context.Context) (domain.Version, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if r.writable == nil {
+	if r.scope.Actor != application.ActorSystem || r.writable == nil {
 		return "", application.ErrInvalidScope
 	}
 	n, ok := domain.VersionNumber(*r.writable)
@@ -850,12 +960,15 @@ func (r registryRepository) Page(ctx context.Context, limit int, after string) (
 	if err := ctx.Err(); err != nil {
 		return application.RegistryPage{}, err
 	}
+	if r.scope.Actor != application.ActorSystem {
+		return application.RegistryPage{}, application.ErrScopeMismatch
+	}
 	if limit < 1 || limit > 1000 {
 		return application.RegistryPage{}, application.ErrInvalidScope
 	}
 	ids := make([]domain.EntityID, 0, len(r.restaurants))
 	for id, restaurant := range r.restaurants {
-		if id > domain.EntityID(after) && restaurant.Lifecycle != "deleted" {
+		if id > domain.EntityID(after) && restaurant.Lifecycle != "deleted" && canReadRestaurant(r.scope, restaurant) {
 			ids = append(ids, id)
 		}
 	}
@@ -884,6 +997,9 @@ func (r lifecycleRepository) Intent(ctx context.Context, operationID domain.Enti
 		return domain.LifecycleIntent{}, false, err
 	}
 	intent, ok := r.lifecycle[operationID]
+	if ok && !canReadOrganization(r.scope, intent.OrgID) {
+		return domain.LifecycleIntent{}, false, nil
+	}
 	return cloneLifecycleIntent(intent), ok, nil
 }
 
@@ -892,6 +1008,9 @@ func (r lifecycleRepository) Tombstone(ctx context.Context, entityID domain.Enti
 		return domain.Tombstone{}, false, err
 	}
 	tombstone, ok := r.tombstones[entityID]
+	if ok && !canReadOrganization(r.scope, tombstone.OrgID) {
+		return domain.Tombstone{}, false, nil
+	}
 	return tombstone, ok, nil
 }
 
@@ -901,6 +1020,9 @@ func (r lifecycleRepository) InsertIntent(ctx context.Context, intent domain.Lif
 	}
 	if intent.OperationID == "" || r.lifecycle[intent.OperationID].OperationID != "" {
 		return application.ErrEntityConflict
+	}
+	if !canWriteOrganization(r.scope, intent.OrgID) {
+		return application.ErrScopeMismatch
 	}
 	if _, ok := r.orgs[intent.OrgID]; !ok {
 		return application.ErrReferenceMissing
@@ -924,6 +1046,9 @@ func (r lifecycleRepository) InsertTombstone(ctx context.Context, tombstone doma
 	}
 	if tombstone.EntityID == "" || r.tombstones[tombstone.EntityID].EntityID != "" {
 		return application.ErrEntityConflict
+	}
+	if !canWriteOrganization(r.scope, tombstone.OrgID) {
+		return application.ErrScopeMismatch
 	}
 	switch tombstone.Kind {
 	case "restaurant":

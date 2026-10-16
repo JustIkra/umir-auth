@@ -286,6 +286,54 @@ BEGIN
     END LOOP;
 END $$;
 
+DROP POLICY registry_state_actor ON registry_state;
+CREATE POLICY registry_state_system ON registry_state
+    USING (NULLIF(current_setting('umir.actor', true), '') = 'system')
+    WITH CHECK (NULLIF(current_setting('umir.actor', true), '') = 'system');
+
+DROP POLICY worker_leases_actor ON worker_leases;
+CREATE POLICY worker_leases_system ON worker_leases
+    USING (NULLIF(current_setting('umir.actor', true), '') = 'system')
+    WITH CHECK (NULLIF(current_setting('umir.actor', true), '') = 'system');
+
+DROP POLICY outbox_actor ON outbox;
+CREATE POLICY outbox_read ON outbox FOR SELECT
+    USING (
+        NULLIF(current_setting('umir.actor', true), '') = 'system'
+        OR (
+            NULLIF(current_setting('umir.actor', true), '') = 'tenant'
+            AND org_id = NULLIF(current_setting('umir.org_id', true), '')
+            AND (
+                (restaurant_id IS NULL AND NULLIF(current_setting('umir.restaurant_id', true), '') IS NULL)
+                OR restaurant_id = NULLIF(current_setting('umir.restaurant_id', true), '')
+            )
+        )
+    );
+CREATE POLICY outbox_insert ON outbox FOR INSERT
+    WITH CHECK (
+        NULLIF(current_setting('umir.actor', true), '') = 'system'
+        OR (
+            NULLIF(current_setting('umir.actor', true), '') = 'tenant'
+            AND org_id = NULLIF(current_setting('umir.org_id', true), '')
+            AND (
+                (restaurant_id IS NULL AND NULLIF(current_setting('umir.restaurant_id', true), '') IS NULL)
+                OR restaurant_id = NULLIF(current_setting('umir.restaurant_id', true), '')
+            )
+        )
+        OR (
+            NULLIF(current_setting('umir.actor', true), '') = 'anonymous'
+            AND org_id IS NULL
+            AND restaurant_id IS NULL
+            AND exchange = 'umir.tasks'
+            AND routing_key = 'auth.mail'
+        )
+    );
+CREATE POLICY outbox_update ON outbox FOR UPDATE
+    USING (NULLIF(current_setting('umir.actor', true), '') = 'system')
+    WITH CHECK (NULLIF(current_setting('umir.actor', true), '') = 'system');
+CREATE POLICY outbox_delete ON outbox FOR DELETE
+    USING (NULLIF(current_setting('umir.actor', true), '') = 'system');
+
 DROP POLICY memberships_org_scope ON memberships;
 CREATE POLICY memberships_scope ON memberships
     USING (

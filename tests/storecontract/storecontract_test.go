@@ -8,5 +8,5 @@ import (
 )
 
 func TestMemoryStore(t *testing.T) {
-	storecontract.Run(t, func() *memstore.Store { return memstore.New() })
+	storecontract.Run(t, func(*testing.T) *memstore.Store { return memstore.New() })
 }

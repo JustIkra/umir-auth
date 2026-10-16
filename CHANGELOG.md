@@ -8,6 +8,8 @@
 
 - Add the initial consumer-owned `application.Store` transaction and user/session/command/organization/restaurant/membership/invitation/challenge/mail-job/budget/outbox/lifecycle/registry repository contracts with a test-only memory implementation. System transactions require a reason. Contract tests cover rollback, user visibility, normalized email-login uniqueness, session user references and digest uniqueness, command-key uniqueness, restaurant organization references, membership assignment scope, pending invitation uniqueness, single-use proof consumption, fenced mail-job claims, rolling budget cutoffs, outbox transaction atomicity, lifecycle copy isolation, and bounded keyset registry pages; the runtime is not wired to this seam yet.
 
+- Enforce tenant scope in memory Store repositories. Make `registry_state` and `worker_leases` system-only under RLS. Give system transactions global outbox access; tenant transactions can read and insert only exact organization/restaurant rows, and anonymous transactions can only insert unscoped `umir.tasks` / `auth.mail` references. Use deterministic UUIDs in shared Store contract fixtures. Relay and worker activation remains blocked while shared global methods use unscoped transactions.
+
 - Read the log `instance_id` from `AUTH_INSTANCE_ID` (C19); a random identifier is only the fallback when it is unset.
 
 - Retry the dummy verifier hash after a failure instead of caching the error until restart.
