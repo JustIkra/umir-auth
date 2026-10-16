@@ -238,6 +238,35 @@ func Run[T application.Store](t *testing.T, newStore func() T) {
 			t.Fatalf("current owner could not finish mail job: %v", err)
 		}
 	})
+	t.Run("budget events use a rolling cutoff", func(t *testing.T) {
+		store := newStore()
+		ctx := context.Background()
+		scope := application.Scope{Actor: application.ActorSystem}
+		if _, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+			return tx.Budgets().Record(ctx, application.BudgetEvent{Kind: "login", KeyDigest: "digest", At: "2026-10-16T00:00:00Z"})
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.View(ctx, scope, func(reader application.Reader) error {
+			count, err := reader.Budgets().CountSince(ctx, "login", "digest", "2026-10-16T00:00:00Z")
+			if err != nil {
+				return err
+			}
+			if count != 1 {
+				t.Fatalf("boundary count = %d, want 1", count)
+			}
+			count, err = reader.Budgets().CountSince(ctx, "login", "digest", "2026-10-16T00:00:01Z")
+			if err != nil {
+				return err
+			}
+			if count != 0 {
+				t.Fatalf("expired count = %d, want 0", count)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func checkFailedTransactionRollsBack(t *testing.T, store application.Store) {

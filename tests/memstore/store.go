@@ -12,17 +12,18 @@ import (
 )
 
 type Store struct {
-	mu          sync.RWMutex
-	users       map[domain.EntityID]domain.User
-	sessions    map[domain.EntityID]domain.Session
-	commands    map[application.CommandKey]domain.IdempotencyRecord
-	orgs        map[domain.EntityID]domain.Organization
-	restaurants map[domain.EntityID]domain.Restaurant
-	memberships map[domain.EntityID]domain.Membership
-	invitations map[domain.EntityID]domain.Invitation
-	challenges  map[domain.EntityID]domain.Challenge
-	mailJobs    map[domain.EntityID]domain.MailJob
-	revision    domain.Version
+	mu           sync.RWMutex
+	users        map[domain.EntityID]domain.User
+	sessions     map[domain.EntityID]domain.Session
+	commands     map[application.CommandKey]domain.IdempotencyRecord
+	orgs         map[domain.EntityID]domain.Organization
+	restaurants  map[domain.EntityID]domain.Restaurant
+	memberships  map[domain.EntityID]domain.Membership
+	invitations  map[domain.EntityID]domain.Invitation
+	challenges   map[domain.EntityID]domain.Challenge
+	mailJobs     map[domain.EntityID]domain.MailJob
+	budgetEvents []application.BudgetEvent
+	revision     domain.Version
 }
 
 func New() *Store {
@@ -48,7 +49,8 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	invitations := cloneInvitations(s.invitations)
 	challenges := cloneChallenges(s.challenges)
 	mailJobs := cloneMailJobs(s.mailJobs)
-	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges, mailJobs: mailJobs}
+	budgetEvents := append([]application.BudgetEvent(nil), s.budgetEvents...)
+	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges, mailJobs: mailJobs, budgetEvents: &budgetEvents}
 	if err := fn(tx); err != nil {
 		return application.CommitResult{Outcome: application.NotCommitted}, err
 	}
@@ -65,6 +67,7 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	s.invitations = invitations
 	s.challenges = challenges
 	s.mailJobs = mailJobs
+	s.budgetEvents = budgetEvents
 	return application.CommitResult{Outcome: application.Committed, AggregateRevision: s.revision}, nil
 }
 
@@ -77,19 +80,20 @@ func (s *Store) View(ctx context.Context, scope application.Scope, fn func(appli
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges, mailJobs: s.mailJobs})
+	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges, mailJobs: s.mailJobs, budgetEvents: s.budgetEvents})
 }
 
 type reader struct {
-	users       map[domain.EntityID]domain.User
-	sessions    map[domain.EntityID]domain.Session
-	commands    map[application.CommandKey]domain.IdempotencyRecord
-	orgs        map[domain.EntityID]domain.Organization
-	restaurants map[domain.EntityID]domain.Restaurant
-	memberships map[domain.EntityID]domain.Membership
-	invitations map[domain.EntityID]domain.Invitation
-	challenges  map[domain.EntityID]domain.Challenge
-	mailJobs    map[domain.EntityID]domain.MailJob
+	users        map[domain.EntityID]domain.User
+	sessions     map[domain.EntityID]domain.Session
+	commands     map[application.CommandKey]domain.IdempotencyRecord
+	orgs         map[domain.EntityID]domain.Organization
+	restaurants  map[domain.EntityID]domain.Restaurant
+	memberships  map[domain.EntityID]domain.Membership
+	invitations  map[domain.EntityID]domain.Invitation
+	challenges   map[domain.EntityID]domain.Challenge
+	mailJobs     map[domain.EntityID]domain.MailJob
+	budgetEvents []application.BudgetEvent
 }
 
 func (r reader) Users() application.UserReader { return userReader{users: r.users} }
@@ -113,17 +117,19 @@ func (r reader) Challenges() application.ChallengeReader {
 	return challengeReader{challenges: r.challenges}
 }
 func (r reader) MailJobs() application.MailJobReader { return mailJobReader{mailJobs: r.mailJobs} }
+func (r reader) Budgets() application.BudgetReader   { return budgetReader{events: r.budgetEvents} }
 
 type transaction struct {
-	users       map[domain.EntityID]domain.User
-	sessions    map[domain.EntityID]domain.Session
-	commands    map[application.CommandKey]domain.IdempotencyRecord
-	orgs        map[domain.EntityID]domain.Organization
-	restaurants map[domain.EntityID]domain.Restaurant
-	memberships map[domain.EntityID]domain.Membership
-	invitations map[domain.EntityID]domain.Invitation
-	challenges  map[domain.EntityID]domain.Challenge
-	mailJobs    map[domain.EntityID]domain.MailJob
+	users        map[domain.EntityID]domain.User
+	sessions     map[domain.EntityID]domain.Session
+	commands     map[application.CommandKey]domain.IdempotencyRecord
+	orgs         map[domain.EntityID]domain.Organization
+	restaurants  map[domain.EntityID]domain.Restaurant
+	memberships  map[domain.EntityID]domain.Membership
+	invitations  map[domain.EntityID]domain.Invitation
+	challenges   map[domain.EntityID]domain.Challenge
+	mailJobs     map[domain.EntityID]domain.MailJob
+	budgetEvents *[]application.BudgetEvent
 }
 
 func (t transaction) Users() application.UserRepository {
@@ -154,6 +160,9 @@ func (t transaction) Challenges() application.ChallengeRepository {
 }
 func (t transaction) MailJobs() application.MailJobRepository {
 	return mailJobRepository{mailJobReader{mailJobs: t.mailJobs}}
+}
+func (t transaction) Budgets() application.BudgetRepository {
+	return budgetRepository{budgetReader{events: *t.budgetEvents}, t.budgetEvents}
 }
 
 type userReader struct {
@@ -711,6 +720,51 @@ func cloneMailJobs(mailJobs map[domain.EntityID]domain.MailJob) map[domain.Entit
 		copyOf[id] = job
 	}
 	return copyOf
+}
+
+type budgetReader struct{ events []application.BudgetEvent }
+
+func (r budgetReader) CountSince(ctx context.Context, kind, key string, since domain.Instant) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	cutoff, err := time.Parse(time.RFC3339Nano, string(since))
+	if err != nil {
+		return 0, application.ErrInvalidBudgetEvent
+	}
+	count := 0
+	for _, event := range r.events {
+		if event.Kind != kind || event.KeyDigest != key {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, string(event.At))
+		if err != nil {
+			return 0, application.ErrInvalidBudgetEvent
+		}
+		if !at.Before(cutoff) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+type budgetRepository struct {
+	budgetReader
+	events *[]application.BudgetEvent
+}
+
+func (r budgetRepository) Record(ctx context.Context, event application.BudgetEvent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if event.Kind == "" || event.KeyDigest == "" {
+		return application.ErrInvalidBudgetEvent
+	}
+	if _, err := time.Parse(time.RFC3339Nano, string(event.At)); err != nil {
+		return application.ErrInvalidBudgetEvent
+	}
+	*r.events = append(*r.events, event)
+	return nil
 }
 
 var _ application.Store = (*Store)(nil)

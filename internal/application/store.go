@@ -37,13 +37,14 @@ func CommandKeyOf(record domain.IdempotencyRecord) CommandKey {
 }
 
 var (
-	ErrEntityConflict   = errors.New("auth entity conflict")
-	ErrInvalidCommand   = errors.New("invalid auth command identity")
-	ErrReferenceMissing = errors.New("auth entity reference missing")
-	ErrInvalidScope     = errors.New("invalid auth storage scope")
-	ErrScopeMismatch    = errors.New("auth entity scope mismatch")
-	ErrLeaseLost        = errors.New("auth work lease lost")
-	ErrInvalidMailJob   = errors.New("invalid auth mail job")
+	ErrEntityConflict     = errors.New("auth entity conflict")
+	ErrInvalidCommand     = errors.New("invalid auth command identity")
+	ErrReferenceMissing   = errors.New("auth entity reference missing")
+	ErrInvalidScope       = errors.New("invalid auth storage scope")
+	ErrScopeMismatch      = errors.New("auth entity scope mismatch")
+	ErrLeaseLost          = errors.New("auth work lease lost")
+	ErrInvalidMailJob     = errors.New("invalid auth mail job")
+	ErrInvalidBudgetEvent = errors.New("invalid auth budget event")
 )
 
 type Store interface {
@@ -61,6 +62,7 @@ type Reader interface {
 	Invitations() InvitationReader
 	Challenges() ChallengeReader
 	MailJobs() MailJobReader
+	Budgets() BudgetReader
 }
 
 type Tx interface {
@@ -73,6 +75,7 @@ type Tx interface {
 	Invitations() InvitationRepository
 	Challenges() ChallengeRepository
 	MailJobs() MailJobRepository
+	Budgets() BudgetRepository
 }
 
 type UserReader interface {
@@ -163,4 +166,19 @@ type MailJobRepository interface {
 	Insert(context.Context, domain.MailJob) error
 	Claim(context.Context, domain.EntityID, string, domain.Instant, domain.Instant) (bool, domain.MailJob, error)
 	Finish(context.Context, domain.EntityID, string, int, string, string) error
+}
+
+type BudgetEvent struct {
+	Kind      string
+	KeyDigest string
+	At        domain.Instant
+}
+
+type BudgetReader interface {
+	CountSince(context.Context, string, string, domain.Instant) (int, error)
+}
+
+type BudgetRepository interface {
+	BudgetReader
+	Record(context.Context, BudgetEvent) error
 }
