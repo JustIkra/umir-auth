@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Drop the stateful preauth issuance table and its 1024-entry cap and mutex; preauth tokens stay self-contained (HMAC and time), and the per-client issue limit belongs to Gateway.
+
 - Stop cloning the whole aggregate for readiness and for idle mail-worker ticks: `ValidatedAggregate.Inspect` gives read-only access, and the sweep and the claim only copy the state when they have work. Session and command-result retention are unchanged.
 
 - Replay stored verify and complete results of an enrollment command even after its challenge was purged, instead of answering an unknown challenge.
