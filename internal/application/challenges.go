@@ -520,6 +520,25 @@ func (s *Accounts) CompleteInvitedUser(ctx context.Context, actor ChallengeActor
 		return SessionView{}, err
 	}
 	in.DisplayName = name
+	hash, err := s.enrollmentPasswordHash(ctx, actor, "completeInvitedUser", in.CommandID, in.Password, func(a domain.Aggregate, who enrollmentActor) error {
+		if err := s.challengeAccess(a, who, in.ChallengeID); err != nil {
+			return err
+		}
+		if who.user.UserID != "" {
+			return ErrForbidden
+		}
+		i, err := challengeIndex(a, in.ChallengeID)
+		if err != nil {
+			return err
+		}
+		if a.Challenges[i].Purpose != "invitation" {
+			return ErrChallengeUnavailable
+		}
+		return s.checkProof(a, a.Challenges[i], in.Proof)
+	})
+	if err != nil {
+		return SessionView{}, err
+	}
 	return enrollmentCommand(s, ctx, actor, "completeInvitedUser", "", in.CommandID, in, "SessionIssued", 200,
 		func(a domain.Aggregate, who enrollmentActor) error { return s.challengeAccess(a, who, in.ChallengeID) },
 		func(a *domain.Aggregate, who enrollmentActor) (enrollmentChange[SessionView], error) {
@@ -547,8 +566,7 @@ func (s *Accounts) CompleteInvitedUser(ctx context.Context, actor ChallengeActor
 					return enrollmentChange[SessionView]{}, ErrInvitationConflict
 				}
 			}
-			hash, err := s.opts.Passwords.Hash(in.Password)
-			if err != nil {
+			if hash == "" {
 				return enrollmentChange[SessionView]{}, ErrAuthUnavailable
 			}
 			id, err := s.newEnrollmentID()
@@ -669,6 +687,33 @@ func (s *Accounts) CompleteEmailChallenge(ctx context.Context, actor ChallengeAc
 			return SessionView{}, err
 		}
 	}
+	var hash string
+	if in.Purpose == "password_reset" {
+		var err error
+		hash, err = s.enrollmentPasswordHash(ctx, actor, "completeEmailChallenge", in.CommandID, in.NewPassword, func(a domain.Aggregate, who enrollmentActor) error {
+			if err := s.challengeAccess(a, who, in.ChallengeID); err != nil {
+				return err
+			}
+			i, err := challengeIndex(a, in.ChallengeID)
+			if err != nil {
+				return err
+			}
+			c := a.Challenges[i]
+			if c.Purpose != in.Purpose {
+				return ErrChallengeUnavailable
+			}
+			if err := s.checkProof(a, c, in.Proof); err != nil {
+				return err
+			}
+			if _, ok := findUser(a, c.UserID); !ok {
+				return ErrChallengeUnavailable
+			}
+			return nil
+		})
+		if err != nil {
+			return SessionView{}, err
+		}
+	}
 	return enrollmentCommand(s, ctx, actor, "completeEmailChallenge", "", in.CommandID, in, "SessionIssued", 200,
 		func(a domain.Aggregate, who enrollmentActor) error { return s.challengeAccess(a, who, in.ChallengeID) },
 		func(a *domain.Aggregate, _ enrollmentActor) (enrollmentChange[SessionView], error) {
@@ -688,8 +733,7 @@ func (s *Accounts) CompleteEmailChallenge(ctx context.Context, actor ChallengeAc
 				return enrollmentChange[SessionView]{}, ErrChallengeUnavailable
 			}
 			if in.Purpose == "password_reset" {
-				hash, err := s.opts.Passwords.Hash(in.NewPassword)
-				if err != nil {
+				if hash == "" {
 					return enrollmentChange[SessionView]{}, ErrAuthUnavailable
 				}
 				u.Verifier = hash

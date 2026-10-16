@@ -164,6 +164,54 @@ func enrollmentCommand[T any](s *Accounts, ctx context.Context, actor ChallengeA
 	}
 }
 
+// enrollmentPasswordHash hashes a password for an enrollment command outside the
+// Accounts mutex and behind the bounded password gate. Under the mutex it only
+// looks: an exact repeat of the command (same operation, key and caller) is
+// answered from its stored result and needs no hash, and precheck refuses what
+// the command would refuse anyway, so a hopeless request costs no hashing. The
+// command re-checks everything at commit time and must not be given a hash for a
+// state that has since changed; a hash that is not used leaves no trace.
+func (s *Accounts) enrollmentPasswordHash(ctx context.Context, actor ChallengeActor, operation, command, password string, precheck func(domain.Aggregate, enrollmentActor) error) (string, error) {
+	if !domain.ValidClientCommandID(command) {
+		return "", &FieldError{Field: "commandID", Code: "InvalidFormat"}
+	}
+	if s.opts.Results == nil {
+		return "", ErrAuthUnavailable
+	}
+	s.mu.Lock()
+	a, err := s.load(ctx)
+	if err != nil {
+		s.mu.Unlock()
+		return "", err
+	}
+	who, err := s.enrollmentActor(a, actor)
+	if err != nil {
+		s.mu.Unlock()
+		return "", err
+	}
+	for _, r := range a.Idempotency {
+		if r.OperationID == operation && r.CommandID == command && r.PreauthDigest == who.preauth && r.ActorID == who.user.UserID {
+			s.mu.Unlock()
+			return "", nil
+		}
+	}
+	err = precheck(a, who)
+	s.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	release, err := s.gate.acquire(ctx, true)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	hash, err := s.opts.Passwords.Hash(password)
+	if err != nil {
+		return "", ErrAuthUnavailable
+	}
+	return hash, nil
+}
+
 // enrollmentFingerprint is the fingerprint of one enrollment command: the same
 // subject, operation, scope and input digest always give the same value.
 func (s *Accounts) enrollmentFingerprint(who enrollmentActor, operation string, org domain.EntityID, input any, profile string) (string, error) {
