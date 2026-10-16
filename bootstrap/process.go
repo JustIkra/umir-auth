@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	mail "github.com/JustIkra/umir-auth/internal/adapters/mail"
@@ -96,7 +97,12 @@ func Run(ctx context.Context, path string) (err error) {
 	if e != nil {
 		return e
 	}
-	o := Options{StateFile: cfg.StateFile, SecretsDir: cfg.SecretsDir, Initial: cfg.Initial, Password: string(password), Clock: clock{location: location}, TimeZones: zones, Runtimes: peers, ServiceKeys: keys}
+	instance, e := NewID()
+	if e != nil {
+		return e
+	}
+	logger := NewLogger(os.Stderr, buildVersion(), instance)
+	o := Options{Logger: logger, StateFile: cfg.StateFile, SecretsDir: cfg.SecretsDir, Initial: cfg.Initial, Password: string(password), Clock: clock{location: location}, TimeZones: zones, Runtimes: peers, ServiceKeys: keys}
 	o.Registration = cfg.Registration
 	o.EmailLoginEnabled = cfg.EmailLoginEnabled
 	o.InvitationMail = cfg.InvitationMail
@@ -166,6 +172,18 @@ func Run(ctx context.Context, path string) (err error) {
 	}
 	stage = "runtime"
 	return runtime.Serve(ctx, listener, handler, sender)
+}
+
+// buildVersion is the VCS revision of the build, or "dev" outside a VCS build.
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" && s.Value != "" {
+				return s.Value
+			}
+		}
+	}
+	return "dev"
 }
 
 type processError struct {

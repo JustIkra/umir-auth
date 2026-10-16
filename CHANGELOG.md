@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Supervise background workers: unrecoverable errors (`ErrRecoveryRequired`, `ErrUpdateOutcomeUnknown`, `ErrClosed`) stop `Serve` with the error so the process exits and is restarted; other errors back off 1 to 30 seconds and retry. `Ready` no longer fails because of a worker, and the JWKS route is gated only by signing readiness. Add structured JSON logging (observability section 3 fields) with `auth.worker.degraded|recovered|fatal` and `auth.mail.attempt` events that carry no codes, addresses or tokens. `MailDelivery` gains `Attempt` and `Age`.
+
 - Coalesce peer Status calls: concurrent callers share one call per service, services are asked in parallel, and a revision change during the call reloads the aggregate and re-evaluates against the same answers instead of asking again. A reconciliation pass asks each service once, records the readiness of one restaurant in one commit and no longer re-checks status after every registration (the final observation does).
 
 - Refuse login passwords over 32 code points or with invalid UTF-8 before the failure throttle, so they no longer fill its 4096 counters or start a cooldown. The response is still InvalidCredentials.

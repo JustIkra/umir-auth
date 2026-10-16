@@ -19,6 +19,19 @@ type MailDelivery struct {
 	JobID domain.EntityID
 	Mail  CodeMail
 	Link  *InvitationLinkMail
+	// Attempt is the number of this delivery attempt (1 for the first) and Age
+	// the time since the job was accepted; both are for operational logging.
+	Attempt int
+	Age     time.Duration
+}
+
+// jobAge is the time since a mail job was accepted, zero if unknown.
+func jobAge(j domain.MailJob, now time.Time) time.Duration {
+	at, err := time.Parse(time.RFC3339Nano, string(j.AcceptedAt))
+	if err != nil || now.Before(at) {
+		return 0
+	}
+	return now.Sub(at)
 }
 
 func (d MailDelivery) Recipient() string {
@@ -476,6 +489,7 @@ func (s *Accounts) claimMail(ctx context.Context) (MailDelivery, int, bool, erro
 		j.LastAttemptAt = formatInstant(now)
 		j.NextAttemptAt = ""
 		attempt := j.Attempts
+		d.Attempt, d.Age = attempt, jobAge(*j, now)
 		if err := s.commit(ctx, a); err != nil {
 			if errors.Is(err, ErrRevisionConflict) && !s.recovering {
 				continue

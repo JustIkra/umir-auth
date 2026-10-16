@@ -24,6 +24,15 @@ func (s *Accounts) Ready(ctx context.Context) error {
 	_, e := s.opts.TimeZones.Ready()
 	return e
 }
+
+// SigningReady reports whether tokens can be signed and the key set published.
+// It does not depend on storage or on any background worker.
+func (s *Accounts) SigningReady() error {
+	if s.opts.Issuer == nil {
+		return ErrAuthUnavailable
+	}
+	return nil
+}
 func (s *Accounts) Access(ctx context.Context, token string) (AccessView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
