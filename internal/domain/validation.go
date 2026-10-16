@@ -360,7 +360,7 @@ func (v *validation) commands(a Aggregate) bool {
 			return false
 		}
 		_, actor := v.users[r.ActorID]
-		if (r.ActorID != "" && !actor) || (r.ActorID == "" && !validDigest(r.PreauthDigest)) || (r.ActorID != "" && r.PreauthDigest != "") || !text(r.OperationID, 1, 128) || !commandText(r.CommandID) || !validDigest(r.Fingerprint) || !version(r.AggregateRevision) || r.HTTPStatus < 200 || r.HTTPStatus > 599 || !text(r.ResponseSchema, 1, 128) || !text(r.EncryptedResponse, 1, 1048576) || r.JobIDs == nil || !unique(r.JobIDs) {
+		if (r.ActorID != "" && !actor) || (r.ActorID == "" && !validDigest(r.PreauthDigest)) || (r.ActorID != "" && r.PreauthDigest != "") || !text(r.OperationID, 1, 128) || !commandText(r.CommandID) || !validDigest(r.Fingerprint) || !version(r.AggregateRevision) || r.HTTPStatus < 200 || r.HTTPStatus > 599 || !text(r.ResponseSchema, 1, 128) || !IsCommandTombstone(r) && !text(r.EncryptedResponse, 1, 1048576) || r.JobIDs == nil || !unique(r.JobIDs) {
 			return false
 		}
 		rv, _ := VersionNumber(r.AggregateRevision)
@@ -397,7 +397,7 @@ func (v *validation) commands(a Aggregate) bool {
 				return false
 			}
 		}
-		if oneOf(r.OperationID, "beginInvitationChallenge", "beginEmailChallenge", "resendChallenge") && (r.HTTPStatus != 200 || r.ResponseSchema != "Challenge" || len(r.JobIDs) != 1) {
+		if oneOf(r.OperationID, "beginInvitationChallenge", "beginEmailChallenge", "resendChallenge") && (r.HTTPStatus != 200 || r.ResponseSchema != "Challenge" || len(r.JobIDs) != 1 && !IsCommandTombstone(r)) {
 			return false
 		}
 		k := key{r.ActorID, r.PreauthDigest, r.OperationID, r.OrgID, r.RestaurantID, r.CommandID}

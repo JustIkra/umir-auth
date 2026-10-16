@@ -36,6 +36,8 @@ type Settings struct {
 	SettingsVersion Version `json:"settingsVersion"`
 }
 type Organization struct {
+	CreatedBy        EntityID `json:"createdBy,omitempty"`
+	CreatedAt        Instant  `json:"createdAt,omitempty"`
 	OrgID            EntityID `json:"orgID"`
 	Name             string   `json:"name"`
 	Settings         Settings `json:"settings"`
@@ -118,6 +120,8 @@ type Challenge struct {
 type MailJob struct {
 	Purpose          string   `json:"purpose,omitempty"`
 	EnqueueOrder     Version  `json:"enqueueOrder,omitempty"`
+	LeaseOwner       string   `json:"leaseOwner,omitempty"`
+	LeaseUntil       Instant  `json:"leaseUntil,omitempty"`
 	JobID            EntityID `json:"jobID"`
 	ChallengeID      EntityID `json:"challengeID,omitempty"`
 	OrgID            EntityID `json:"orgID,omitempty"`
@@ -177,3 +181,9 @@ func Empty() Aggregate {
 }
 func (v ValidatedAggregate) Snapshot() Aggregate { return clone(v.data) }
 func (v ValidatedAggregate) Revision() Version   { return v.data.AggregateRevision }
+
+// Inspect calls fn with the stored aggregate itself, without the copy that
+// Snapshot makes. fn must only read it and must not keep the pointer, or any
+// slice or map reachable from it, after it returns: the storage and every other
+// reader share that data.
+func (v ValidatedAggregate) Inspect(fn func(*Aggregate)) { fn(&v.data) }

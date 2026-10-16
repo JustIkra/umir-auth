@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -46,6 +47,7 @@ type Options struct {
 	TimeZones                       application.TimeZoneCatalog
 	Runtimes                        application.RuntimePeers
 	ServiceKeys                     map[string]string
+	Logger                          *slog.Logger
 }
 type Runtime struct {
 	Store          *jsonstore.Store
@@ -57,8 +59,10 @@ type Runtime struct {
 	AccountOptions application.AccountOptions
 	once           sync.Once
 	closeErr       error
-	healthMu       sync.Mutex
-	workerErr      error
+	// Log receives the structured records of the workers; it is never nil after
+	// Open. Pause waits out a failed worker's backoff; tests replace it.
+	Log   *slog.Logger
+	Pause application.ReconciliationWaiter
 }
 type ownerSecrets struct {
 	Version                                             int          `json:"version"`
@@ -142,9 +146,9 @@ func open(ctx context.Context, o Options, imported *domain.ValidatedAggregate) (
 				return nil, ErrBootstrapConflict
 			}
 		}
-		store, err = jsonstore.Initialize(ctx, o.StateFile, v)
+		store, err = jsonstore.Initialize(ctx, o.StateFile, v, jsonstore.WithClock(o.Clock))
 	} else {
-		store, err = jsonstore.Open(ctx, o.StateFile)
+		store, err = jsonstore.Open(ctx, o.StateFile, jsonstore.WithClock(o.Clock))
 	}
 	if err != nil {
 		return nil, errors.Join(ErrNotReady, err)
@@ -198,7 +202,11 @@ func open(ctx context.Context, o Options, imported *domain.ValidatedAggregate) (
 	if err != nil {
 		return nil, ErrNotReady
 	}
-	return &Runtime{AccountOptions: accountOptions, Preauth: preauth, Store: store, Accounts: accounts, Signer: signer, Initialized: initialize, BindingSHA256: secrets.Binding}, nil
+	logger := o.Logger
+	if logger == nil {
+		logger = discardLogger()
+	}
+	return &Runtime{Log: logger, Pause: hostWaiter{}, AccountOptions: accountOptions, Preauth: preauth, Store: store, Accounts: accounts, Signer: signer, Initialized: initialize, BindingSHA256: secrets.Binding}, nil
 }
 func loadSecrets(o Options, initialize bool) (ownerSecrets, error) {
 	p := filepath.Join(o.SecretsDir, "owner.json")
@@ -285,17 +293,9 @@ type physicalPageClock struct{}
 
 func (physicalPageClock) Now() time.Time { return time.Now() }
 
-func (r *Runtime) failWorker(err error) {
-	r.healthMu.Lock()
-	defer r.healthMu.Unlock()
-	r.workerErr = err
-}
+// Ready reports whether Auth can serve. A background worker's trouble is not
+// part of it: workers retry on their own or stop the process (see Serve), so a
+// live process never answers 503 only because a worker failed once.
 func (r *Runtime) Ready(ctx context.Context) error {
-	r.healthMu.Lock()
-	err := r.workerErr
-	r.healthMu.Unlock()
-	if err != nil {
-		return application.ErrAuthUnavailable
-	}
 	return r.Accounts.Ready(ctx)
 }

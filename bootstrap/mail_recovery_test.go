@@ -190,31 +190,22 @@ func TestMailDeadlineDoesNotHideUnknownAuthorityOutcome(t *testing.T) {
 	}
 	processor := &unknownAuthorityProcessor{returned: make(chan struct{})}
 	work, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- r.ServeWithMailProcessor(work, listener, handler, mailSuccessSender{}, processor) }()
-	t.Cleanup(func() {
-		cancel()
-		if err := <-done; err != nil {
-			t.Error(err)
-		}
-	})
 	select {
 	case <-processor.returned:
 	case <-time.After(13 * time.Second):
 		t.Fatal("worker did not finish its timed-out attempt")
 	}
-	deadline := time.NewTimer(time.Second)
-	defer deadline.Stop()
-	tick := time.NewTicker(time.Millisecond)
-	defer tick.Stop()
-	for {
-		select {
-		case <-tick.C:
-			if err := r.Ready(context.Background()); errors.Is(err, application.ErrAuthUnavailable) {
-				return
-			}
-		case <-deadline.C:
-			t.Fatal("attempt timeout hid an unknown authority outcome")
+	// The unknown outcome is not hidden by the attempt deadline: the process stops
+	// (the supervisor restarts it) instead of staying alive and unready.
+	select {
+	case err := <-done:
+		if !errors.Is(err, application.ErrUpdateOutcomeUnknown) {
+			t.Fatalf("Serve returned %v; want the unknown authority outcome", err)
 		}
+	case <-time.After(time.Second):
+		t.Fatal("attempt timeout hid an unknown authority outcome")
 	}
 }

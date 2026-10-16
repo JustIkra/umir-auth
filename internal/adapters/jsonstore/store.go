@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/JustIkra/umir-auth/internal/application"
 	"github.com/JustIkra/umir-auth/internal/domain"
@@ -40,15 +41,36 @@ type Store struct {
 	path             string
 	lock             *writerLock
 	closed, recovery bool
+	clock            application.Clock
 }
+
+// Option configures a Store.
+type Option func(*Store)
+
+// WithClock sets the instant against which a replacement is checked for the
+// removal of expired challenges. It must be the clock the Accounts use; without
+// it the store uses the system clock.
+func WithClock(c application.Clock) Option {
+	return func(s *Store) {
+		if c != nil {
+			s.clock = c
+		}
+	}
+}
+
+type systemClock struct{}
+
+func (systemClock) Now() time.Time { return time.Now() }
 
 var _ application.AggregateRepository = (*Store)(nil)
 
-func Open(ctx context.Context, p string) (*Store, error) { return open(ctx, p, nil, systemDisk()) }
-func Initialize(ctx context.Context, p string, a domain.ValidatedAggregate) (*Store, error) {
-	return open(ctx, p, &initialization{a}, systemDisk())
+func Open(ctx context.Context, p string, options ...Option) (*Store, error) {
+	return open(ctx, p, nil, systemDisk(), options...)
 }
-func open(ctx context.Context, p string, initial *initialization, files disk) (*Store, error) {
+func Initialize(ctx context.Context, p string, a domain.ValidatedAggregate, options ...Option) (*Store, error) {
+	return open(ctx, p, &initialization{a}, systemDisk(), options...)
+}
+func open(ctx context.Context, p string, initial *initialization, files disk, options ...Option) (*Store, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, safe(application.ErrStorageUnavailable, err)
 	}
@@ -68,7 +90,10 @@ func open(ctx context.Context, p string, initial *initialization, files disk) (*
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{path: p, files: files, lock: lock}
+	s := &Store{path: p, files: files, lock: lock, clock: systemClock{}}
+	for _, option := range options {
+		option(s)
+	}
 	if initial != nil {
 		if _, err := os.Lstat(p); !errors.Is(err, os.ErrNotExist) {
 			return nil, safe(application.ErrStorageUnavailable, errors.Join(err, lock.close()))
@@ -155,7 +180,7 @@ func (s *Store) Commit(ctx context.Context, expected domain.Version, next domain
 	if err := zones(v); err != nil {
 		return result, err
 	}
-	if err := domain.ValidateReplacement(s.current, v); err != nil {
+	if err := domain.ValidateReplacementAt(s.current, v, s.clock.Now()); err != nil {
 		return result, err
 	}
 	outcome, err := s.replace(ctx, v)

@@ -27,7 +27,7 @@ func (s *Accounts) claimInvitationLink(ctx context.Context, a domain.Aggregate, 
 	j.Attempts++
 	j.LastAttemptAt = formatInstant(now)
 	j.NextAttemptAt = ""
-	delivery, attempt := MailDelivery{JobID: j.JobID, Link: &mail}, j.Attempts
+	delivery, attempt := MailDelivery{JobID: j.JobID, Link: &mail, Attempt: j.Attempts, Age: jobAge(*j, now)}, j.Attempts
 	if err := s.commit(ctx, a); err != nil {
 		return MailDelivery{}, 0, false, err
 	}

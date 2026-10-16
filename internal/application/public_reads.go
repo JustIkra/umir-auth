@@ -15,15 +15,23 @@ type AccessView struct {
 func (s *Accounts) Ready(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, e := s.load(ctx)
-	if e != nil {
+	if e := s.inspect(ctx, func(*domain.Aggregate) {}); e != nil {
 		return e
 	}
 	if s.opts.TimeZones == nil || s.opts.Issuer == nil || s.opts.Challenges == nil || s.opts.Results == nil {
 		return ErrAuthUnavailable
 	}
-	_, e = s.opts.TimeZones.Ready()
+	_, e := s.opts.TimeZones.Ready()
 	return e
+}
+
+// SigningReady reports whether tokens can be signed and the key set published.
+// It does not depend on storage or on any background worker.
+func (s *Accounts) SigningReady() error {
+	if s.opts.Issuer == nil {
+		return ErrAuthUnavailable
+	}
+	return nil
 }
 func (s *Accounts) Access(ctx context.Context, token string) (AccessView, error) {
 	s.mu.Lock()
@@ -125,7 +133,7 @@ func (s *Accounts) Acknowledge(ctx context.Context, service string, peer domain.
 	if peer.State != want || peer.State == "ready" && !status.Ready {
 		return domain.PeerReadiness{}, ErrForbidden
 	}
-	if e = s.recordReadiness(ctx, op, peer, nil); e != nil {
+	if e = s.recordReadiness(ctx, op, []readinessUpdate{{peer: peer}}); e != nil {
 		return domain.PeerReadiness{}, e
 	}
 	return peer, nil

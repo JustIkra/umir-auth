@@ -9,17 +9,17 @@ import (
 	"encoding/hex"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/JustIkra/umir-auth/internal/application"
 )
 
+// Preauth issues self-contained anonymous tokens (an HMAC over an issue time and
+// random bytes). It keeps no per-token state: the issue rate per client is the
+// Gateway's to limit, and a token is checked by its MAC and age alone.
 type Preauth struct {
-	mu     sync.Mutex
-	key    []byte
-	clock  application.Clock
-	issued map[string]time.Time
+	key   []byte
+	clock application.Clock
 }
 type PreauthIssued struct {
 	CSRFToken    string `json:"csrfToken"`
@@ -31,7 +31,7 @@ func NewPreauth(key []byte, clock application.Clock) (*Preauth, error) {
 	if len(key) != 32 || clock == nil {
 		return nil, application.ErrAuthUnavailable
 	}
-	return &Preauth{key: append([]byte(nil), key...), clock: clock, issued: map[string]time.Time{}}, nil
+	return &Preauth{key: append([]byte(nil), key...), clock: clock}, nil
 }
 func (p *Preauth) mac(body string) string {
 	h := hmac.New(sha256.New, p.key)
@@ -41,20 +41,10 @@ func (p *Preauth) mac(body string) string {
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
 func (p *Preauth) Issue(existing string) (PreauthIssued, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	if csrf, until, ok := p.validate(existing); ok {
 		return PreauthIssued{csrf, existing, until.Format(time.RFC3339Nano)}, nil
 	}
 	now := p.clock.Now()
-	for k, v := range p.issued {
-		if !now.Before(v) {
-			delete(p.issued, k)
-		}
-	}
-	if len(p.issued) >= 1024 {
-		return PreauthIssued{}, application.ErrAuthUnavailable
-	}
 	var random [32]byte
 	if _, e := rand.Read(random[:]); e != nil {
 		return PreauthIssued{}, application.ErrAuthUnavailable
@@ -62,7 +52,6 @@ func (p *Preauth) Issue(existing string) (PreauthIssued, error) {
 	until := now.Add(30 * time.Minute)
 	body := strconv.FormatInt(now.Unix(), 10) + "." + hex.EncodeToString(random[:])
 	token := body + "." + p.mac(body)
-	p.issued[application.TokenDigest(token)] = until
 	return PreauthIssued{p.mac("csrf:" + token), token, until.Format(time.RFC3339Nano)}, nil
 }
 func (p *Preauth) validate(token string) (string, time.Time, bool) {
@@ -84,8 +73,6 @@ func (p *Preauth) validate(token string) (string, time.Time, bool) {
 	return p.mac("csrf:" + token), until, true
 }
 func (p *Preauth) Verify(token, csrf string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	expected, _, ok := p.validate(token)
 	if !ok || csrf == "" || !hmac.Equal([]byte(csrf), []byte(expected)) {
 		return application.ErrInvalidCSRFToken

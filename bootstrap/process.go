@@ -8,6 +8,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime/debug"
 	"time"
 
 	mail "github.com/JustIkra/umir-auth/internal/adapters/mail"
@@ -96,7 +98,12 @@ func Run(ctx context.Context, path string) (err error) {
 	if e != nil {
 		return e
 	}
-	o := Options{StateFile: cfg.StateFile, SecretsDir: cfg.SecretsDir, Initial: cfg.Initial, Password: string(password), Clock: clock{location: location}, TimeZones: zones, Runtimes: peers, ServiceKeys: keys}
+	instance, e := instanceID(os.Getenv("AUTH_INSTANCE_ID"))
+	if e != nil {
+		return e
+	}
+	logger := NewLogger(os.Stderr, buildVersion(), instance)
+	o := Options{Logger: logger, StateFile: cfg.StateFile, SecretsDir: cfg.SecretsDir, Initial: cfg.Initial, Password: string(password), Clock: clock{location: location}, TimeZones: zones, Runtimes: peers, ServiceKeys: keys}
 	o.Registration = cfg.Registration
 	o.EmailLoginEnabled = cfg.EmailLoginEnabled
 	o.InvitationMail = cfg.InvitationMail
@@ -166,6 +173,33 @@ func Run(ctx context.Context, path string) (err error) {
 	}
 	stage = "runtime"
 	return runtime.Serve(ctx, listener, handler, sender)
+}
+
+var instancePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+
+// instanceID is the log instance_id: the replica name the deployment sets in
+// AUTH_INSTANCE_ID (for example auth-a), or a random identifier of this process
+// when it is not set. A set but malformed value is a configuration error.
+func instanceID(configured string) (string, error) {
+	if configured == "" {
+		return NewID()
+	}
+	if !instancePattern.MatchString(configured) {
+		return "", errors.New("invalid AUTH_INSTANCE_ID")
+	}
+	return configured, nil
+}
+
+// buildVersion is the VCS revision of the build, or "dev" outside a VCS build.
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" && s.Value != "" {
+				return s.Value
+			}
+		}
+	}
+	return "dev"
 }
 
 type processError struct {

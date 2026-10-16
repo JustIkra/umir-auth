@@ -90,7 +90,7 @@ func TestPrivateListenerAuthorizationCSRFAndRealSession(t *testing.T) {
 	headers := map[string]string{"X-Umir-Preauth": token, "X-Umir-CSRF-Token": csrf}
 	status, session := call("POST", "/internal/auth/v1/public/session", o.ServiceKeys["gateway"], body, headers)
 	if status != 200 || len(session["view"]) == 0 {
-		t.Fatalf("real login: %d", status)
+		t.Fatalf("real login: %d code=%s", status, session["code"])
 	}
 	status, replay := call("POST", "/internal/auth/v1/public/session", o.ServiceKeys["gateway"], body, headers)
 	if status != 200 || !bytes.Equal(session["sessionToken"], replay["sessionToken"]) {

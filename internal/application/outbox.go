@@ -19,6 +19,19 @@ type MailDelivery struct {
 	JobID domain.EntityID
 	Mail  CodeMail
 	Link  *InvitationLinkMail
+	// Attempt is the number of this delivery attempt (1 for the first) and Age
+	// the time since the job was accepted; both are for operational logging.
+	Attempt int
+	Age     time.Duration
+}
+
+// jobAge is the time since a mail job was accepted, zero if unknown.
+func jobAge(j domain.MailJob, now time.Time) time.Duration {
+	at, err := time.Parse(time.RFC3339Nano, string(j.AcceptedAt))
+	if err != nil || now.Before(at) {
+		return 0
+	}
+	return now.Sub(at)
 }
 
 func (d MailDelivery) Recipient() string {
@@ -182,16 +195,59 @@ func (s *Accounts) ProcessMail(ctx context.Context, sender MailSender) (bool, er
 		return true, err
 	}
 }
+
+// mailJobDue is the selection rule of claimMail.
+func mailJobDue(j domain.MailJob, now time.Time) bool {
+	return (j.State == "queued" || j.State == "unknown") && (j.NextAttemptAt == "" || !before(now, j.NextAttemptAt)) && (j.Purpose != "invitation_link" || j.State != "unknown" || j.Attempts < 3)
+}
+
+// mailClaimable reports whether claimMail would find a job. It only reads a.
+func mailClaimable(a domain.Aggregate, now time.Time) bool {
+	for _, j := range a.MailJobs {
+		if mailJobDue(j, now) {
+			return true
+		}
+	}
+	return false
+}
+
+// sweepDue reports whether SweepEnrollment would change anything at now. It only
+// reads a and is kept to the same conditions as the sweep below.
+func sweepDue(a domain.Aggregate, now time.Time) bool {
+	for _, v := range a.Invitations {
+		if v.State == "pending" && !before(now, v.ExpiresAt) {
+			return true
+		}
+	}
+	for _, c := range a.Challenges {
+		if c.State == "pending" {
+			_, admissionErr := challengeEmail(a, c, now)
+			if !before(now, c.ExpiresAt) || admissionErr != nil {
+				return true
+			}
+		}
+	}
+	return len(purgeableChallenges(a, now)) > 0
+}
 func (s *Accounts) SweepEnrollment(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for {
+		// The common tick finds nothing to do; decide that without copying the state.
+		due := false
+		if err := s.inspect(ctx, func(a *domain.Aggregate) { due = sweepDue(*a, s.opts.Clock.Now()) }); err != nil {
+			return err
+		}
+		if !due {
+			return nil
+		}
 		a, err := s.load(ctx)
 		if err != nil {
 			return err
 		}
 		now := s.opts.Clock.Now()
 		changed := false
+		purge := purgeableChallenges(a, now)
 		for i := range a.Invitations {
 			v := &a.Invitations[i]
 			if v.State == "pending" && !before(now, v.ExpiresAt) {
@@ -216,6 +272,10 @@ func (s *Accounts) SweepEnrollment(ctx context.Context) error {
 				}
 			}
 		}
+		if len(purge) > 0 {
+			purgeChallenges(&a, purge)
+			changed = true
+		}
 		if !changed {
 			return nil
 		}
@@ -224,6 +284,64 @@ func (s *Accounts) SweepEnrollment(ctx context.Context) error {
 			continue
 		}
 		return err
+	}
+}
+
+// purgeableChallenges selects the challenges whose retention (domain.ChallengePurgeAt)
+// has ended and none of whose jobs can still send or be resolved. The state read
+// is the stored one: a job that this very pass suppresses is only dropped by the
+// next pass, because a replacement may not remove a live job.
+func purgeableChallenges(a domain.Aggregate, now time.Time) map[domain.EntityID]bool {
+	live := map[domain.EntityID]bool{}
+	for _, j := range a.MailJobs {
+		if domain.ChallengeJobLive(j) {
+			live[j.ChallengeID] = true
+		}
+	}
+	var purge map[domain.EntityID]bool
+	for _, c := range a.Challenges {
+		if !live[c.ChallengeID] && domain.ChallengePurgeable(c, now) {
+			if purge == nil {
+				purge = map[domain.EntityID]bool{}
+			}
+			purge[c.ChallengeID] = true
+		}
+	}
+	return purge
+}
+
+// purgeChallenges removes the challenges, their OTP jobs, and replaces the
+// challenge command records that pointed only at those jobs with tombstones, so
+// a repeat of such a command never runs again (C18, C29).
+func purgeChallenges(a *domain.Aggregate, purge map[domain.EntityID]bool) {
+	challenges := make([]domain.Challenge, 0, len(a.Challenges))
+	for _, c := range a.Challenges {
+		if !purge[c.ChallengeID] {
+			challenges = append(challenges, c)
+		}
+	}
+	a.Challenges = challenges
+	removed := map[domain.EntityID]bool{}
+	jobs := make([]domain.MailJob, 0, len(a.MailJobs))
+	for _, j := range a.MailJobs {
+		if purge[j.ChallengeID] && j.Purpose != "invitation_link" {
+			removed[j.JobID] = true
+			continue
+		}
+		jobs = append(jobs, j)
+	}
+	a.MailJobs = jobs
+	for i, r := range a.Idempotency {
+		if !domain.IsChallengeCommand(r.OperationID) || len(r.JobIDs) == 0 {
+			continue
+		}
+		gone := true
+		for _, id := range r.JobIDs {
+			gone = gone && removed[id]
+		}
+		if gone {
+			a.Idempotency[i] = domain.CommandTombstone(r)
+		}
 	}
 }
 func validateEnrollmentSecrets(a domain.Aggregate, secrets ChallengeSecrets, links InvitationURLPolicy) error {
@@ -298,6 +416,13 @@ func (s *Accounts) claimMail(ctx context.Context) (MailDelivery, int, bool, erro
 		if err := ctx.Err(); err != nil {
 			return MailDelivery{}, 0, false, err
 		}
+		claimable := false
+		if err := s.inspect(ctx, func(a *domain.Aggregate) { claimable = mailClaimable(*a, s.opts.Clock.Now()) }); err != nil {
+			return MailDelivery{}, 0, false, err
+		}
+		if !claimable {
+			return MailDelivery{}, 0, false, nil
+		}
 		a, err := s.load(ctx)
 		if err != nil {
 			return MailDelivery{}, 0, false, err
@@ -305,7 +430,7 @@ func (s *Accounts) claimMail(ctx context.Context) (MailDelivery, int, bool, erro
 		now := s.opts.Clock.Now()
 		selected := -1
 		for i, j := range a.MailJobs {
-			if (j.State == "queued" || j.State == "unknown") && (j.NextAttemptAt == "" || !before(now, j.NextAttemptAt)) && (j.Purpose != "invitation_link" || j.State != "unknown" || j.Attempts < 3) {
+			if mailJobDue(j, now) {
 				if selected < 0 || j.AcceptedAt < a.MailJobs[selected].AcceptedAt {
 					selected = i
 				}
@@ -364,6 +489,7 @@ func (s *Accounts) claimMail(ctx context.Context) (MailDelivery, int, bool, erro
 		j.LastAttemptAt = formatInstant(now)
 		j.NextAttemptAt = ""
 		attempt := j.Attempts
+		d.Attempt, d.Age = attempt, jobAge(*j, now)
 		if err := s.commit(ctx, a); err != nil {
 			if errors.Is(err, ErrRevisionConflict) && !s.recovering {
 				continue

@@ -1,6 +1,9 @@
 package domain
 
-import "slices"
+import (
+	"slices"
+	"time"
+)
 
 type commandKey struct {
 	actor              EntityID
@@ -15,7 +18,75 @@ func commandIdentity(r IdempotencyRecord) commandKey {
 func sameCommand(a, b IdempotencyRecord) bool {
 	return commandIdentity(a) == commandIdentity(b) && a.ContractProfile == b.ContractProfile && a.Fingerprint == b.Fingerprint && a.AggregateRevision == b.AggregateRevision && a.HTTPStatus == b.HTTPStatus && a.ResponseSchema == b.ResponseSchema && a.EncryptedResponse == b.EncryptedResponse && a.RecordedAt == b.RecordedAt && slices.Equal(a.JobIDs, b.JobIDs)
 }
+
+// Retention of e-mail challenges (auth spec 4.1, C18). A challenge without a
+// proof may go one hour after the later of its expiry and its last wrong
+// attempt, which is also the whole wrong-code budget window. A challenge with a
+// proof may go 24 hours after the proof expires.
+const (
+	ChallengeRetentionWithoutProof = time.Hour
+	ChallengeRetentionAfterProof   = 24 * time.Hour
+)
+
+// ChallengePurgeAt reports the first instant at which the challenge may be
+// removed. It is false when the stored instants are unusable, in which case the
+// challenge is never removed.
+func ChallengePurgeAt(c Challenge) (time.Time, bool) {
+	if c.ProofDigest != "" || c.EncryptedProof != "" || c.ProofExpiresAt != "" {
+		at, ok := instant(c.ProofExpiresAt)
+		return at.Add(ChallengeRetentionAfterProof), ok
+	}
+	at, ok := instant(c.ExpiresAt)
+	for _, raw := range c.WrongAttemptTimes {
+		wrong, valid := instant(raw)
+		ok = ok && valid
+		if wrong.After(at) {
+			at = wrong
+		}
+	}
+	return at.Add(ChallengeRetentionWithoutProof), ok
+}
+
+// ChallengePurgeable reports whether the retention of the challenge has ended.
+func ChallengePurgeable(c Challenge, now time.Time) bool {
+	at, ok := ChallengePurgeAt(c)
+	return ok && !now.Before(at)
+}
+
+// ChallengeJobLive reports whether an OTP job may still send or be resolved.
+func ChallengeJobLive(j MailJob) bool { return oneOf(j.State, "queued", "sending", "unknown") }
+
+// IsChallengeCommand reports the operations whose records point at OTP jobs.
+func IsChallengeCommand(operation string) bool {
+	return oneOf(operation, "beginInvitationChallenge", "beginEmailChallenge", "resendChallenge")
+}
+
+// IsCommandTombstone reports a challenge command record whose result and jobs
+// were removed together with the challenge.
+func IsCommandTombstone(r IdempotencyRecord) bool {
+	return IsChallengeCommand(r.OperationID) && r.EncryptedResponse == "" && len(r.JobIDs) == 0
+}
+
+// CommandTombstone keeps the key and fingerprint of a record and drops its
+// result and job edges.
+func CommandTombstone(r IdempotencyRecord) IdempotencyRecord {
+	r.EncryptedResponse = ""
+	r.JobIDs = []EntityID{}
+	return r
+}
+
+// ValidateReplacement is ValidateReplacementAt with no instant, so nothing is
+// ever removed.
 func ValidateReplacement(previous, next ValidatedAggregate) error {
+	return ValidateReplacementAt(previous, next, time.Time{})
+}
+
+// ValidateReplacementAt checks that next may replace previous. Besides the
+// monotonic rules it allows exactly one removal, all or nothing: a challenge
+// whose retention has ended at now, its OTP jobs (none of them live), and the
+// challenge command records that point only at those jobs, which become
+// tombstones.
+func ValidateReplacementAt(previous, next ValidatedAggregate, now time.Time) error {
 	before, after := previous.data, next.data
 	if before.SchemaVersion != after.SchemaVersion {
 		if before.SchemaVersion > after.SchemaVersion || after.SchemaVersion > 3 {
@@ -92,33 +163,50 @@ func ValidateReplacement(previous, next ValidatedAggregate) error {
 			return ErrInvalidAggregate
 		}
 	}
-	commands := map[commandKey]IdempotencyRecord{}
-	for _, r := range after.Idempotency {
-		commands[commandIdentity(r)] = r
+	challenges := map[EntityID]Challenge{}
+	for _, c := range after.Challenges {
+		challenges[c.ChallengeID] = c
 	}
-	for _, r := range before.Idempotency {
-		n, ok := commands[commandIdentity(r)]
-		if !ok || !sameCommand(r, n) {
-			return ErrInvalidAggregate
+	removedChallenges := map[EntityID]bool{}
+	for _, c := range before.Challenges {
+		if _, ok := challenges[c.ChallengeID]; !ok {
+			if !ChallengePurgeable(c, now) {
+				return ErrInvalidAggregate
+			}
+			removedChallenges[c.ChallengeID] = true
 		}
 	}
 	jobs := map[EntityID]MailJob{}
 	for _, j := range after.MailJobs {
 		jobs[j.JobID] = j
 	}
+	removedJobs := map[EntityID]bool{}
 	for _, j := range before.MailJobs {
 		n, ok := jobs[j.JobID]
+		if !ok && removedChallenges[j.ChallengeID] && j.Purpose != "invitation_link" && !ChallengeJobLive(j) {
+			removedJobs[j.JobID] = true
+			continue
+		}
 		if !ok || j.Purpose != n.Purpose || j.EnqueueOrder != n.EnqueueOrder || j.ChallengeID != n.ChallengeID || j.OrgID != n.OrgID || j.InvitationID != n.InvitationID || j.AcceptedAt != n.AcceptedAt || j.EncryptedPayload != n.EncryptedPayload && (n.EncryptedPayload != "" || !oneOf(n.State, "delivered", "failed", "suppressed")) || n.Attempts < j.Attempts || oneOf(j.State, "delivered", "failed", "suppressed") && n.State != j.State {
 			return ErrInvalidAggregate
 		}
 	}
-	challenges := map[EntityID]Challenge{}
-	for _, c := range after.Challenges {
-		challenges[c.ChallengeID] = c
-	}
 	for _, c := range before.Challenges {
 		n, ok := challenges[c.ChallengeID]
+		if removedChallenges[c.ChallengeID] {
+			continue
+		}
 		if !ok || c.SuppressedEmail != n.SuppressedEmail || len(n.WrongAttemptTimes) < len(c.WrongAttemptTimes) || !slices.Equal(c.WrongAttemptTimes, n.WrongAttemptTimes[:len(c.WrongAttemptTimes)]) || c.RegistrationEmail != n.RegistrationEmail || c.RegistrationSuppressed != n.RegistrationSuppressed || c.Purpose != n.Purpose || c.InvitationID != n.InvitationID || c.UserID != n.UserID || c.CredentialVersion != n.CredentialVersion || c.InitiatorDigest != n.InitiatorDigest || c.ExpiresAt != n.ExpiresAt || c.CodeDigest != n.CodeDigest || c.EncryptedCode != n.EncryptedCode && (n.EncryptedCode != "" || n.State == "pending") || !ordered(c.ResendAvailableAt, n.ResendAvailableAt) || c.IssueCount > n.IssueCount || c.WrongAttempts > n.WrongAttempts || c.ProofDigest != "" && (c.ProofDigest != n.ProofDigest || c.EncryptedProof != n.EncryptedProof || c.ProofExpiresAt != n.ProofExpiresAt) || c.State == "verified" && !oneOf(n.State, "verified", "completed") || oneOf(c.State, "completed", "expired", "locked") && n.State != c.State {
+			return ErrInvalidAggregate
+		}
+	}
+	commands := map[commandKey]IdempotencyRecord{}
+	for _, r := range after.Idempotency {
+		commands[commandIdentity(r)] = r
+	}
+	for _, r := range before.Idempotency {
+		n, ok := commands[commandIdentity(r)]
+		if !ok || !sameCommand(r, n) && !tombstoned(r, n, removedJobs) {
 			return ErrInvalidAggregate
 		}
 	}
@@ -145,6 +233,20 @@ func ValidateReplacement(previous, next ValidatedAggregate) error {
 		}
 	}
 	return nil
+}
+
+// tombstoned reports whether next is exactly the tombstone of previous and every
+// job previous pointed at was removed.
+func tombstoned(previous, next IdempotencyRecord, removedJobs map[EntityID]bool) bool {
+	if !IsChallengeCommand(previous.OperationID) || len(previous.JobIDs) == 0 || !IsCommandTombstone(next) {
+		return false
+	}
+	for _, id := range previous.JobIDs {
+		if !removedJobs[id] {
+			return false
+		}
+	}
+	return sameCommand(CommandTombstone(previous), next)
 }
 func sameInviteAssignments(a, b []InviteAssignment) bool {
 	return slices.EqualFunc(a, b, func(x, y InviteAssignment) bool {

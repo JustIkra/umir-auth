@@ -126,7 +126,7 @@ func (s *Accounts) CreateInvitation(ctx context.Context, token, csrf string, org
 			recent := 0
 			for i := range a.Invitations {
 				old := &a.Invitations[i]
-				if old.ComparisonEmail != comparison || old.OrgID != org {
+				if !sameEmail(old.ComparisonEmail, comparison) || old.OrgID != org {
 					continue
 				}
 				if old.State == "pending" && before(now, old.ExpiresAt) {

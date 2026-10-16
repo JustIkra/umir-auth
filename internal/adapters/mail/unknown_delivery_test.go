@@ -2,6 +2,7 @@ package mailadapter
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 
@@ -32,4 +33,65 @@ func TestAcceptedSMTPDropReplyRemainsUnknown(t *testing.T) {
 	default:
 		t.Fatal("test never accepted SMTP DATA")
 	}
+}
+
+func dialTestSMTP(t *testing.T, port int) application.DeliveryResult {
+	t.Helper()
+	config := validSMTPConfig()
+	config.Port = port
+	config.TLSMode = "starttls"
+	transport, err := NewSMTP(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return transport.send(context.Background(), "to@example.test", []byte("Subject: x\r\n\r\nx\r\n"))
+}
+
+// A failed dial sent nothing, so the job is retried (L2); a failure after the
+// connection exists may have sent something, so it stays unknown.
+func TestSMTPDialFailureRetriesAndLaterFailureStaysUnknown(t *testing.T) {
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listenerPort(t, closed)
+	if err := closed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if result := dialTestSMTP(t, port); result.Success || result.Permanent || result.Unknown {
+		t.Fatalf("a refused connection is %+v; want a plain retry", result)
+	}
+
+	hangup, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := hangup.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	go func() {
+		for {
+			conn, err := hangup.Accept()
+			if err != nil {
+				return
+			}
+			if err := conn.Close(); err != nil {
+				return
+			}
+		}
+	}()
+	if result := dialTestSMTP(t, listenerPort(t, hangup)); result.Success || result.Permanent || !result.Unknown {
+		t.Fatalf("a hang-up after connecting is %+v; want unknown", result)
+	}
+}
+
+func listenerPort(t *testing.T, l net.Listener) int {
+	t.Helper()
+	addr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatal("listener is not TCP")
+	}
+	return addr.Port
 }
