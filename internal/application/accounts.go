@@ -169,6 +169,23 @@ func (s *Accounts) load(ctx context.Context) (domain.Aggregate, error) {
 	}
 	return a.Snapshot(), nil
 }
+
+// inspect runs fn over the stored aggregate without cloning it; see
+// domain.ValidatedAggregate.Inspect for what fn may do. The caller holds s.mu.
+func (s *Accounts) inspect(ctx context.Context, fn func(*domain.Aggregate)) error {
+	if s.recovering {
+		return ErrAuthUnavailable
+	}
+	a, err := s.opts.Repository.Load(ctx)
+	if err != nil {
+		if errors.Is(err, ErrRecoveryRequired) {
+			s.recovering = true
+		}
+		return errors.Join(ErrAuthUnavailable, err)
+	}
+	a.Inspect(fn)
+	return nil
+}
 func (s *Accounts) commit(ctx context.Context, a domain.Aggregate) error {
 	old := a.AggregateRevision
 	next, err := nextVersion(old)

@@ -15,14 +15,13 @@ type AccessView struct {
 func (s *Accounts) Ready(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, e := s.load(ctx)
-	if e != nil {
+	if e := s.inspect(ctx, func(*domain.Aggregate) {}); e != nil {
 		return e
 	}
 	if s.opts.TimeZones == nil || s.opts.Issuer == nil || s.opts.Challenges == nil || s.opts.Results == nil {
 		return ErrAuthUnavailable
 	}
-	_, e = s.opts.TimeZones.Ready()
+	_, e := s.opts.TimeZones.Ready()
 	return e
 }
 func (s *Accounts) Access(ctx context.Context, token string) (AccessView, error) {

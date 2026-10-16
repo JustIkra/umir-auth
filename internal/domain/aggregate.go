@@ -177,3 +177,9 @@ func Empty() Aggregate {
 }
 func (v ValidatedAggregate) Snapshot() Aggregate { return clone(v.data) }
 func (v ValidatedAggregate) Revision() Version   { return v.data.AggregateRevision }
+
+// Inspect calls fn with the stored aggregate itself, without the copy that
+// Snapshot makes. fn must only read it and must not keep the pointer, or any
+// slice or map reachable from it, after it returns: the storage and every other
+// reader share that data.
+func (v ValidatedAggregate) Inspect(fn func(*Aggregate)) { fn(&v.data) }

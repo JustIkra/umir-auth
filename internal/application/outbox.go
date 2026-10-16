@@ -182,10 +182,52 @@ func (s *Accounts) ProcessMail(ctx context.Context, sender MailSender) (bool, er
 		return true, err
 	}
 }
+
+// mailJobDue is the selection rule of claimMail.
+func mailJobDue(j domain.MailJob, now time.Time) bool {
+	return (j.State == "queued" || j.State == "unknown") && (j.NextAttemptAt == "" || !before(now, j.NextAttemptAt)) && (j.Purpose != "invitation_link" || j.State != "unknown" || j.Attempts < 3)
+}
+
+// mailClaimable reports whether claimMail would find a job. It only reads a.
+func mailClaimable(a domain.Aggregate, now time.Time) bool {
+	for _, j := range a.MailJobs {
+		if mailJobDue(j, now) {
+			return true
+		}
+	}
+	return false
+}
+
+// sweepDue reports whether SweepEnrollment would change anything at now. It only
+// reads a and is kept to the same conditions as the sweep below.
+func sweepDue(a domain.Aggregate, now time.Time) bool {
+	for _, v := range a.Invitations {
+		if v.State == "pending" && !before(now, v.ExpiresAt) {
+			return true
+		}
+	}
+	for _, c := range a.Challenges {
+		if c.State == "pending" {
+			_, admissionErr := challengeEmail(a, c, now)
+			if !before(now, c.ExpiresAt) || admissionErr != nil {
+				return true
+			}
+		}
+	}
+	return len(purgeableChallenges(a, now)) > 0
+}
 func (s *Accounts) SweepEnrollment(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for {
+		// The common tick finds nothing to do; decide that without copying the state.
+		due := false
+		if err := s.inspect(ctx, func(a *domain.Aggregate) { due = sweepDue(*a, s.opts.Clock.Now()) }); err != nil {
+			return err
+		}
+		if !due {
+			return nil
+		}
 		a, err := s.load(ctx)
 		if err != nil {
 			return err
@@ -361,6 +403,13 @@ func (s *Accounts) claimMail(ctx context.Context) (MailDelivery, int, bool, erro
 		if err := ctx.Err(); err != nil {
 			return MailDelivery{}, 0, false, err
 		}
+		claimable := false
+		if err := s.inspect(ctx, func(a *domain.Aggregate) { claimable = mailClaimable(*a, s.opts.Clock.Now()) }); err != nil {
+			return MailDelivery{}, 0, false, err
+		}
+		if !claimable {
+			return MailDelivery{}, 0, false, nil
+		}
 		a, err := s.load(ctx)
 		if err != nil {
 			return MailDelivery{}, 0, false, err
@@ -368,7 +417,7 @@ func (s *Accounts) claimMail(ctx context.Context) (MailDelivery, int, bool, erro
 		now := s.opts.Clock.Now()
 		selected := -1
 		for i, j := range a.MailJobs {
-			if (j.State == "queued" || j.State == "unknown") && (j.NextAttemptAt == "" || !before(now, j.NextAttemptAt)) && (j.Purpose != "invitation_link" || j.State != "unknown" || j.Attempts < 3) {
+			if mailJobDue(j, now) {
 				if selected < 0 || j.AcceptedAt < a.MailJobs[selected].AcceptedAt {
 					selected = i
 				}

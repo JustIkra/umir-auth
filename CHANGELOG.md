@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stop cloning the whole aggregate for readiness and for idle mail-worker ticks: `ValidatedAggregate.Inspect` gives read-only access, and the sweep and the claim only copy the state when they have work. Session and command-result retention are unchanged.
+
 - Replay stored verify and complete results of an enrollment command even after its challenge was purged, instead of answering an unknown challenge.
 
 - Purge expired email challenges and their OTP jobs in the outbox sweep (one hour after expiry or the last wrong attempt, 24 hours after proof expiry; never while a job is queued, sending or unknown) and replace their begin/resend command records with tombstones. A repeat of such a command answers the existing 409 CommandConflict with outcome unknown and issues no challenge. Keeps the 4096 cap as a defensive limit that password-reset floods no longer reach. The file store now takes the Auth clock to validate removals.
