@@ -141,8 +141,10 @@ func (r reader) Invitations() application.InvitationReader {
 func (r reader) Challenges() application.ChallengeReader {
 	return challengeReader{challenges: r.challenges}
 }
-func (r reader) MailJobs() application.MailJobReader { return mailJobReader{mailJobs: r.mailJobs} }
-func (r reader) Budgets() application.BudgetReader   { return budgetReader{events: r.budgetEvents} }
+func (r reader) MailJobs() application.MailJobReader {
+	return mailJobReader{mailJobs: r.mailJobs, scope: r.scope}
+}
+func (r reader) Budgets() application.BudgetReader { return budgetReader{events: r.budgetEvents} }
 func (r reader) Outbox() application.OutboxReader {
 	return outboxRepository{events: r.outbox, scope: r.scope}
 }
@@ -198,7 +200,7 @@ func (t transaction) Challenges() application.ChallengeRepository {
 	return challengeRepository{challengeReader{challenges: t.challenges}}
 }
 func (t transaction) MailJobs() application.MailJobRepository {
-	return mailJobRepository{mailJobReader{mailJobs: t.mailJobs}}
+	return mailJobRepository{mailJobReader{mailJobs: t.mailJobs, scope: t.scope}}
 }
 func (t transaction) Budgets() application.BudgetRepository {
 	return budgetRepository{budgetReader{events: *t.budgetEvents}, t.budgetEvents}
@@ -759,6 +761,7 @@ func cloneChallenge(challenge domain.Challenge) domain.Challenge {
 
 type mailJobReader struct {
 	mailJobs map[domain.EntityID]domain.MailJob
+	scope    application.Scope
 }
 
 func (r mailJobReader) Get(ctx context.Context, id domain.EntityID) (domain.MailJob, bool, error) {
@@ -766,7 +769,14 @@ func (r mailJobReader) Get(ctx context.Context, id domain.EntityID) (domain.Mail
 		return domain.MailJob{}, false, err
 	}
 	job, ok := r.mailJobs[id]
+	if ok && !canReadMailJob(r.scope, job) {
+		return domain.MailJob{}, false, nil
+	}
 	return job, ok, nil
+}
+
+func canReadMailJob(scope application.Scope, job domain.MailJob) bool {
+	return scope.Actor == application.ActorSystem || scope.Actor == application.ActorTenant && scope.OrgID == job.OrgID
 }
 
 type mailJobRepository struct{ mailJobReader }
@@ -775,7 +785,13 @@ func (r mailJobRepository) Insert(ctx context.Context, job domain.MailJob) error
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if job.JobID == "" || r.mailJobs[job.JobID].JobID != "" {
+	if job.JobID == "" {
+		return application.ErrEntityConflict
+	}
+	if !canReadMailJob(r.scope, job) {
+		return application.ErrScopeMismatch
+	}
+	if r.mailJobs[job.JobID].JobID != "" {
 		return application.ErrEntityConflict
 	}
 	r.mailJobs[job.JobID] = job
@@ -787,6 +803,9 @@ func (r mailJobRepository) Claim(ctx context.Context, id domain.EntityID, owner 
 		return false, domain.MailJob{}, err
 	}
 	job, ok := r.mailJobs[id]
+	if ok && !canReadMailJob(r.scope, job) {
+		return false, domain.MailJob{}, application.ErrScopeMismatch
+	}
 	if !ok || owner == "" || job.Attempts >= 3 || (job.State != "queued" && job.State != "unknown") {
 		return false, domain.MailJob{}, nil
 	}
@@ -819,6 +838,9 @@ func (r mailJobRepository) Finish(ctx context.Context, id domain.EntityID, owner
 		return err
 	}
 	job, ok := r.mailJobs[id]
+	if ok && !canReadMailJob(r.scope, job) {
+		return application.ErrScopeMismatch
+	}
 	if !ok || job.State != "sending" || job.LeaseOwner != owner || job.Attempts != attempt {
 		return application.ErrLeaseLost
 	}

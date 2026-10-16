@@ -442,6 +442,8 @@ func Run[T application.Store](t *testing.T, newStore func(*testing.T) T) {
 		restaurantA := domain.Restaurant{RestaurantID: testID("scope-restaurant-a"), OrgID: orgA.OrgID, Name: "A1", Lifecycle: "ready", LifecycleVersion: "1"}
 		restaurantSibling := domain.Restaurant{RestaurantID: testID("scope-restaurant-a-sibling"), OrgID: orgA.OrgID, Name: "A2", Lifecycle: "ready", LifecycleVersion: "1"}
 		restaurantB := domain.Restaurant{RestaurantID: testID("scope-restaurant-b"), OrgID: orgB.OrgID, Name: "B", Lifecycle: "ready", LifecycleVersion: "1"}
+		mailJobA := domain.MailJob{JobID: testID("scope-mail-job-a"), OrgID: orgA.OrgID, State: "queued", AcceptedAt: "2026-10-16T00:00:00Z"}
+		mailJobB := domain.MailJob{JobID: testID("scope-mail-job-b"), OrgID: orgB.OrgID, State: "queued", AcceptedAt: "2026-10-16T00:00:00Z"}
 		outboxB := application.OutboxEvent{ID: testID("scope-outbox-b"), Exchange: "umir.auth", RoutingKey: "auth.restaurant.deleted", OrgID: orgB.OrgID, RestaurantID: restaurantB.RestaurantID, Body: []byte(`{"eventID":"scope-b","schemaVersion":1,"generation":"scope"}`)}
 		if _, err := store.InTx(ctx, system, func(tx application.Tx) error {
 			if err := insertOrganization(ctx, tx, orgA); err != nil {
@@ -457,6 +459,12 @@ func Run[T application.Store](t *testing.T, newStore func(*testing.T) T) {
 				return err
 			}
 			if err := tx.Restaurants().Insert(ctx, restaurantB); err != nil {
+				return err
+			}
+			if err := tx.MailJobs().Insert(ctx, mailJobB); err != nil {
+				return err
+			}
+			if err := tx.MailJobs().Insert(ctx, mailJobA); err != nil {
 				return err
 			}
 			_, err := tx.Outbox().Insert(ctx, outboxB)
@@ -488,11 +496,45 @@ func Run[T application.Store](t *testing.T, newStore func(*testing.T) T) {
 			} else if found {
 				t.Fatal("tenant read another organization's outbox row")
 			}
+			if _, found, err := reader.MailJobs().Get(ctx, mailJobB.JobID); err != nil {
+				return err
+			} else if found {
+				t.Fatal("tenant read another organization's mail job")
+			}
+			if _, found, err := reader.MailJobs().Get(ctx, mailJobA.JobID); err != nil {
+				return err
+			} else if !found {
+				t.Fatal("tenant could not read its organization's mail job")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		user := application.Scope{Actor: application.ActorUser, UserID: testID("organization-creator")}
+		if err := store.View(ctx, user, func(reader application.Reader) error {
+			if _, found, err := reader.MailJobs().Get(ctx, mailJobB.JobID); err != nil {
+				return err
+			} else if found {
+				t.Fatal("user read an organization-scoped mail job")
+			}
 			return nil
 		}); err != nil {
 			t.Fatal(err)
 		}
 		_, err := store.InTx(ctx, tenant, func(tx application.Tx) error {
+			_, _, err := tx.MailJobs().Claim(ctx, mailJobB.JobID, "tenant-worker", "2026-10-16T00:00:00Z", "2026-10-16T00:01:00Z")
+			return err
+		})
+		if !errors.Is(err, application.ErrScopeMismatch) {
+			t.Fatalf("tenant claimed another organization's mail job: %v", err)
+		}
+		_, err = store.InTx(ctx, tenant, func(tx application.Tx) error {
+			return tx.MailJobs().Finish(ctx, mailJobB.JobID, "worker", 1, "delivered", "")
+		})
+		if !errors.Is(err, application.ErrScopeMismatch) {
+			t.Fatalf("tenant finished another organization's mail job: %v", err)
+		}
+		_, err = store.InTx(ctx, tenant, func(tx application.Tx) error {
 			return tx.Restaurants().Insert(ctx, domain.Restaurant{RestaurantID: testID("scope-restaurant-cross-write"), OrgID: orgB.OrgID, Lifecycle: "registering", LifecycleVersion: "1"})
 		})
 		if !errors.Is(err, application.ErrScopeMismatch) {
@@ -510,6 +552,24 @@ func Run[T application.Store](t *testing.T, newStore func(*testing.T) T) {
 		})
 		if !errors.Is(err, application.ErrScopeMismatch) {
 			t.Fatalf("tenant wrote another organization's outbox row: %v", err)
+		}
+		_, err = store.InTx(ctx, tenant, func(tx application.Tx) error {
+			return tx.MailJobs().Insert(ctx, domain.MailJob{JobID: testID("scope-mail-job-cross-write"), OrgID: orgB.OrgID, State: "queued", AcceptedAt: "2026-10-16T00:00:00Z"})
+		})
+		if !errors.Is(err, application.ErrScopeMismatch) {
+			t.Fatalf("tenant wrote another organization's mail job: %v", err)
+		}
+		_, err = store.InTx(ctx, tenant, func(tx application.Tx) error {
+			return tx.MailJobs().Insert(ctx, domain.MailJob{JobID: testID("scope-mail-job-tenant-write"), OrgID: orgA.OrgID, State: "queued", AcceptedAt: "2026-10-16T00:00:00Z"})
+		})
+		if err != nil {
+			t.Fatalf("tenant could not write its organization's mail job: %v", err)
+		}
+		_, err = store.InTx(ctx, user, func(tx application.Tx) error {
+			return tx.MailJobs().Insert(ctx, domain.MailJob{JobID: testID("scope-mail-job-user-write"), OrgID: orgA.OrgID, State: "queued", AcceptedAt: "2026-10-16T00:00:00Z"})
+		})
+		if !errors.Is(err, application.ErrScopeMismatch) {
+			t.Fatalf("user wrote an organization-scoped mail job: %v", err)
 		}
 	})
 }

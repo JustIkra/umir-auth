@@ -10,6 +10,8 @@
 
 - Enforce tenant scope in memory Store repositories. Make `registry_state` and `worker_leases` system-only under RLS. Give system transactions global outbox access; tenant transactions can read and insert only exact organization/restaurant rows, and anonymous transactions can only insert unscoped `umir.tasks` / `auth.mail` references. Use deterministic UUIDs in shared Store contract fixtures. Relay and worker activation remains blocked while shared global methods use unscoped transactions.
 
+- Apply the Auth organization scope to memory mail-job reads, inserts, claims and finishes. User-scoped transactions cannot read or mutate organization mail jobs.
+
 - Read the log `instance_id` from `AUTH_INSTANCE_ID` (C19); a random identifier is only the fallback when it is unset.
 
 - Retry the dummy verifier hash after a failure instead of caching the error until restart.
