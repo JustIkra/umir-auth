@@ -80,6 +80,39 @@ func Run[T application.Store](t *testing.T, newStore func() T) {
 			t.Fatalf("command key reused with a different fingerprint: %v", err)
 		}
 	})
+	t.Run("restaurant organization reference", func(t *testing.T) {
+		store := newStore()
+		ctx := context.Background()
+		scope := application.Scope{Actor: application.ActorSystem}
+		org := domain.Organization{OrgID: "org-1", Name: "Organization", Lifecycle: "active", LifecycleVersion: "1"}
+		restaurant := domain.Restaurant{RestaurantID: "restaurant-1", OrgID: org.OrgID, Name: "Restaurant", Lifecycle: "registering", LifecycleVersion: "1"}
+		if _, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+			if err := tx.Organizations().Insert(ctx, org); err != nil {
+				return err
+			}
+			return tx.Restaurants().Insert(ctx, restaurant)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+			return tx.Restaurants().Insert(ctx, domain.Restaurant{RestaurantID: "restaurant-2", OrgID: "missing-org", Lifecycle: "registering", LifecycleVersion: "1"})
+		})
+		if !errors.Is(err, application.ErrReferenceMissing) {
+			t.Fatalf("restaurant without organization was accepted: %v", err)
+		}
+		if err := store.View(ctx, scope, func(reader application.Reader) error {
+			restaurants, err := reader.Restaurants().ForOrganization(ctx, org.OrgID)
+			if err != nil {
+				return err
+			}
+			if len(restaurants) != 1 || restaurants[0].RestaurantID != restaurant.RestaurantID {
+				t.Fatal("organization restaurant query returned an unexpected scope")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func checkFailedTransactionRollsBack(t *testing.T, store application.Store) {

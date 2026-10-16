@@ -52,12 +52,16 @@ type Reader interface {
 	Users() UserReader
 	Sessions() SessionReader
 	Commands() CommandReader
+	Organizations() OrganizationReader
+	Restaurants() RestaurantReader
 }
 
 type Tx interface {
 	Users() UserRepository
 	Sessions() SessionRepository
 	Commands() CommandRepository
+	Organizations() OrganizationRepository
+	Restaurants() RestaurantRepository
 }
 
 type UserReader interface {
@@ -87,4 +91,23 @@ type CommandReader interface {
 type CommandRepository interface {
 	CommandReader
 	Insert(context.Context, domain.IdempotencyRecord) error
+}
+
+type OrganizationReader interface {
+	Get(context.Context, domain.EntityID) (domain.Organization, bool, error)
+}
+
+type OrganizationRepository interface {
+	OrganizationReader
+	Insert(context.Context, domain.Organization) error
+}
+
+type RestaurantReader interface {
+	Get(context.Context, domain.EntityID) (domain.Restaurant, bool, error)
+	ForOrganization(context.Context, domain.EntityID) ([]domain.Restaurant, error)
+}
+
+type RestaurantRepository interface {
+	RestaurantReader
+	Insert(context.Context, domain.Restaurant) error
 }

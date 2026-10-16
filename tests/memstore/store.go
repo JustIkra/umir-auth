@@ -10,15 +10,17 @@ import (
 )
 
 type Store struct {
-	mu       sync.RWMutex
-	users    map[domain.EntityID]domain.User
-	sessions map[domain.EntityID]domain.Session
-	commands map[application.CommandKey]domain.IdempotencyRecord
-	revision domain.Version
+	mu          sync.RWMutex
+	users       map[domain.EntityID]domain.User
+	sessions    map[domain.EntityID]domain.Session
+	commands    map[application.CommandKey]domain.IdempotencyRecord
+	orgs        map[domain.EntityID]domain.Organization
+	restaurants map[domain.EntityID]domain.Restaurant
+	revision    domain.Version
 }
 
 func New() *Store {
-	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), revision: "1"}
+	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), revision: "1"}
 }
 
 func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(application.Tx) error) (application.CommitResult, error) {
@@ -34,7 +36,9 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	users := cloneUsers(s.users)
 	sessions := cloneSessions(s.sessions)
 	commands := cloneCommands(s.commands)
-	tx := transaction{users: users, sessions: sessions, commands: commands}
+	orgs := cloneOrganizations(s.orgs)
+	restaurants := cloneRestaurants(s.restaurants)
+	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants}
 	if err := fn(tx); err != nil {
 		return application.CommitResult{Outcome: application.NotCommitted}, err
 	}
@@ -45,6 +49,8 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	s.users = users
 	s.sessions = sessions
 	s.commands = commands
+	s.orgs = orgs
+	s.restaurants = restaurants
 	return application.CommitResult{Outcome: application.Committed, AggregateRevision: s.revision}, nil
 }
 
@@ -57,13 +63,15 @@ func (s *Store) View(ctx context.Context, scope application.Scope, fn func(appli
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands})
+	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants})
 }
 
 type reader struct {
-	users    map[domain.EntityID]domain.User
-	sessions map[domain.EntityID]domain.Session
-	commands map[application.CommandKey]domain.IdempotencyRecord
+	users       map[domain.EntityID]domain.User
+	sessions    map[domain.EntityID]domain.Session
+	commands    map[application.CommandKey]domain.IdempotencyRecord
+	orgs        map[domain.EntityID]domain.Organization
+	restaurants map[domain.EntityID]domain.Restaurant
 }
 
 func (r reader) Users() application.UserReader { return userReader{users: r.users} }
@@ -71,11 +79,19 @@ func (r reader) Sessions() application.SessionReader {
 	return sessionReader{users: r.users, sessions: r.sessions}
 }
 func (r reader) Commands() application.CommandReader { return commandReader{commands: r.commands} }
+func (r reader) Organizations() application.OrganizationReader {
+	return organizationReader{orgs: r.orgs}
+}
+func (r reader) Restaurants() application.RestaurantReader {
+	return restaurantReader{orgs: r.orgs, restaurants: r.restaurants}
+}
 
 type transaction struct {
-	users    map[domain.EntityID]domain.User
-	sessions map[domain.EntityID]domain.Session
-	commands map[application.CommandKey]domain.IdempotencyRecord
+	users       map[domain.EntityID]domain.User
+	sessions    map[domain.EntityID]domain.Session
+	commands    map[application.CommandKey]domain.IdempotencyRecord
+	orgs        map[domain.EntityID]domain.Organization
+	restaurants map[domain.EntityID]domain.Restaurant
 }
 
 func (t transaction) Users() application.UserRepository {
@@ -88,6 +104,12 @@ func (t transaction) Sessions() application.SessionRepository {
 
 func (t transaction) Commands() application.CommandRepository {
 	return commandRepository{commandReader{commands: t.commands}}
+}
+func (t transaction) Organizations() application.OrganizationRepository {
+	return organizationRepository{organizationReader{orgs: t.orgs}}
+}
+func (t transaction) Restaurants() application.RestaurantRepository {
+	return restaurantRepository{restaurantReader{orgs: t.orgs, restaurants: t.restaurants}}
 }
 
 type userReader struct {
@@ -212,6 +234,73 @@ func (r commandRepository) Insert(ctx context.Context, record domain.Idempotency
 	return nil
 }
 
+type organizationReader struct {
+	orgs map[domain.EntityID]domain.Organization
+}
+
+func (r organizationReader) Get(ctx context.Context, id domain.EntityID) (domain.Organization, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Organization{}, false, err
+	}
+	org, ok := r.orgs[id]
+	return org, ok, nil
+}
+
+type organizationRepository struct{ organizationReader }
+
+func (r organizationRepository) Insert(ctx context.Context, org domain.Organization) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if org.OrgID == "" || r.orgs[org.OrgID].OrgID != "" {
+		return application.ErrEntityConflict
+	}
+	r.orgs[org.OrgID] = org
+	return nil
+}
+
+type restaurantReader struct {
+	orgs        map[domain.EntityID]domain.Organization
+	restaurants map[domain.EntityID]domain.Restaurant
+}
+
+func (r restaurantReader) Get(ctx context.Context, id domain.EntityID) (domain.Restaurant, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Restaurant{}, false, err
+	}
+	restaurant, ok := r.restaurants[id]
+	return restaurant, ok, nil
+}
+
+func (r restaurantReader) ForOrganization(ctx context.Context, orgID domain.EntityID) ([]domain.Restaurant, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var restaurants []domain.Restaurant
+	for _, restaurant := range r.restaurants {
+		if restaurant.OrgID == orgID {
+			restaurants = append(restaurants, restaurant)
+		}
+	}
+	return restaurants, nil
+}
+
+type restaurantRepository struct{ restaurantReader }
+
+func (r restaurantRepository) Insert(ctx context.Context, restaurant domain.Restaurant) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if restaurant.RestaurantID == "" || r.restaurants[restaurant.RestaurantID].RestaurantID != "" {
+		return application.ErrEntityConflict
+	}
+	if _, ok := r.orgs[restaurant.OrgID]; !ok {
+		return application.ErrReferenceMissing
+	}
+	r.restaurants[restaurant.RestaurantID] = restaurant
+	return nil
+}
+
 func check(ctx context.Context, scope application.Scope) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -245,6 +334,22 @@ func cloneCommands(commands map[application.CommandKey]domain.IdempotencyRecord)
 	for key, record := range commands {
 		record.JobIDs = append([]domain.EntityID(nil), record.JobIDs...)
 		copyOf[key] = record
+	}
+	return copyOf
+}
+
+func cloneOrganizations(orgs map[domain.EntityID]domain.Organization) map[domain.EntityID]domain.Organization {
+	copyOf := make(map[domain.EntityID]domain.Organization, len(orgs))
+	for id, org := range orgs {
+		copyOf[id] = org
+	}
+	return copyOf
+}
+
+func cloneRestaurants(restaurants map[domain.EntityID]domain.Restaurant) map[domain.EntityID]domain.Restaurant {
+	copyOf := make(map[domain.EntityID]domain.Restaurant, len(restaurants))
+	for id, restaurant := range restaurants {
+		copyOf[id] = restaurant
 	}
 	return copyOf
 }
