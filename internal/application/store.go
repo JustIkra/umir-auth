@@ -42,6 +42,8 @@ var (
 	ErrReferenceMissing = errors.New("auth entity reference missing")
 	ErrInvalidScope     = errors.New("invalid auth storage scope")
 	ErrScopeMismatch    = errors.New("auth entity scope mismatch")
+	ErrLeaseLost        = errors.New("auth work lease lost")
+	ErrInvalidMailJob   = errors.New("invalid auth mail job")
 )
 
 type Store interface {
@@ -58,6 +60,7 @@ type Reader interface {
 	Memberships() MembershipReader
 	Invitations() InvitationReader
 	Challenges() ChallengeReader
+	MailJobs() MailJobReader
 }
 
 type Tx interface {
@@ -69,6 +72,7 @@ type Tx interface {
 	Memberships() MembershipRepository
 	Invitations() InvitationRepository
 	Challenges() ChallengeRepository
+	MailJobs() MailJobRepository
 }
 
 type UserReader interface {
@@ -148,4 +152,15 @@ type ChallengeRepository interface {
 	ChallengeReader
 	Insert(context.Context, domain.Challenge) error
 	ConsumeProof(context.Context, domain.EntityID, string) (bool, error)
+}
+
+type MailJobReader interface {
+	Get(context.Context, domain.EntityID) (domain.MailJob, bool, error)
+}
+
+type MailJobRepository interface {
+	MailJobReader
+	Insert(context.Context, domain.MailJob) error
+	Claim(context.Context, domain.EntityID, string, domain.Instant, domain.Instant) (bool, domain.MailJob, error)
+	Finish(context.Context, domain.EntityID, string, int, string, string) error
 }

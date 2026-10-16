@@ -193,6 +193,51 @@ func Run[T application.Store](t *testing.T, newStore func() T) {
 			t.Fatalf("proof consumption winners = %d, want 1", winners.Load())
 		}
 	})
+	t.Run("mail job claim is fenced", func(t *testing.T) {
+		store := newStore()
+		ctx := context.Background()
+		scope := application.Scope{Actor: application.ActorSystem}
+		job := domain.MailJob{JobID: "job-1", State: "queued", EncryptedPayload: "payload", AcceptedAt: "2026-10-16T00:00:00Z", NextAttemptAt: "2026-10-16T00:00:00Z"}
+		if _, err := store.InTx(ctx, scope, func(tx application.Tx) error { return tx.MailJobs().Insert(ctx, job) }); err != nil {
+			t.Fatal(err)
+		}
+		var winners atomic.Int32
+		var attempt atomic.Int32
+		var wg sync.WaitGroup
+		for i := 0; i < 16; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+					claimed, result, err := tx.MailJobs().Claim(ctx, job.JobID, "worker-a", "2026-10-16T00:01:00Z", "2026-10-16T00:01:15Z")
+					if claimed {
+						winners.Add(1)
+						attempt.Store(int32(result.Attempts))
+					}
+					return err
+				})
+				if err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+		wg.Wait()
+		if winners.Load() != 1 || attempt.Load() != 1 {
+			t.Fatalf("claim winners=%d attempt=%d", winners.Load(), attempt.Load())
+		}
+		_, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+			return tx.MailJobs().Finish(ctx, job.JobID, "worker-old", 1, "delivered", "")
+		})
+		if !errors.Is(err, application.ErrLeaseLost) {
+			t.Fatalf("stale owner finished mail job: %v", err)
+		}
+		_, err = store.InTx(ctx, scope, func(tx application.Tx) error {
+			return tx.MailJobs().Finish(ctx, job.JobID, "worker-a", 1, "delivered", "")
+		})
+		if err != nil {
+			t.Fatalf("current owner could not finish mail job: %v", err)
+		}
+	})
 }
 
 func checkFailedTransactionRollsBack(t *testing.T, store application.Store) {

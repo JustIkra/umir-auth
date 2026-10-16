@@ -118,6 +118,8 @@ type Challenge struct {
 type MailJob struct {
 	Purpose          string   `json:"purpose,omitempty"`
 	EnqueueOrder     Version  `json:"enqueueOrder,omitempty"`
+	LeaseOwner       string   `json:"leaseOwner,omitempty"`
+	LeaseUntil       Instant  `json:"leaseUntil,omitempty"`
 	JobID            EntityID `json:"jobID"`
 	ChallengeID      EntityID `json:"challengeID,omitempty"`
 	OrgID            EntityID `json:"orgID,omitempty"`

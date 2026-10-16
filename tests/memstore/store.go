@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/JustIkra/umir-auth/internal/application"
 	"github.com/JustIkra/umir-auth/internal/domain"
@@ -20,11 +21,12 @@ type Store struct {
 	memberships map[domain.EntityID]domain.Membership
 	invitations map[domain.EntityID]domain.Invitation
 	challenges  map[domain.EntityID]domain.Challenge
+	mailJobs    map[domain.EntityID]domain.MailJob
 	revision    domain.Version
 }
 
 func New() *Store {
-	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), invitations: make(map[domain.EntityID]domain.Invitation), challenges: make(map[domain.EntityID]domain.Challenge), revision: "1"}
+	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), invitations: make(map[domain.EntityID]domain.Invitation), challenges: make(map[domain.EntityID]domain.Challenge), mailJobs: make(map[domain.EntityID]domain.MailJob), revision: "1"}
 }
 
 func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(application.Tx) error) (application.CommitResult, error) {
@@ -45,7 +47,8 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	memberships := cloneMemberships(s.memberships)
 	invitations := cloneInvitations(s.invitations)
 	challenges := cloneChallenges(s.challenges)
-	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges}
+	mailJobs := cloneMailJobs(s.mailJobs)
+	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations, challenges: challenges, mailJobs: mailJobs}
 	if err := fn(tx); err != nil {
 		return application.CommitResult{Outcome: application.NotCommitted}, err
 	}
@@ -61,6 +64,7 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	s.memberships = memberships
 	s.invitations = invitations
 	s.challenges = challenges
+	s.mailJobs = mailJobs
 	return application.CommitResult{Outcome: application.Committed, AggregateRevision: s.revision}, nil
 }
 
@@ -73,7 +77,7 @@ func (s *Store) View(ctx context.Context, scope application.Scope, fn func(appli
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges})
+	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations, challenges: s.challenges, mailJobs: s.mailJobs})
 }
 
 type reader struct {
@@ -85,6 +89,7 @@ type reader struct {
 	memberships map[domain.EntityID]domain.Membership
 	invitations map[domain.EntityID]domain.Invitation
 	challenges  map[domain.EntityID]domain.Challenge
+	mailJobs    map[domain.EntityID]domain.MailJob
 }
 
 func (r reader) Users() application.UserReader { return userReader{users: r.users} }
@@ -107,6 +112,7 @@ func (r reader) Invitations() application.InvitationReader {
 func (r reader) Challenges() application.ChallengeReader {
 	return challengeReader{challenges: r.challenges}
 }
+func (r reader) MailJobs() application.MailJobReader { return mailJobReader{mailJobs: r.mailJobs} }
 
 type transaction struct {
 	users       map[domain.EntityID]domain.User
@@ -117,6 +123,7 @@ type transaction struct {
 	memberships map[domain.EntityID]domain.Membership
 	invitations map[domain.EntityID]domain.Invitation
 	challenges  map[domain.EntityID]domain.Challenge
+	mailJobs    map[domain.EntityID]domain.MailJob
 }
 
 func (t transaction) Users() application.UserRepository {
@@ -144,6 +151,9 @@ func (t transaction) Invitations() application.InvitationRepository {
 }
 func (t transaction) Challenges() application.ChallengeRepository {
 	return challengeRepository{challengeReader{challenges: t.challenges}}
+}
+func (t transaction) MailJobs() application.MailJobRepository {
+	return mailJobRepository{mailJobReader{mailJobs: t.mailJobs}}
 }
 
 type userReader struct {
@@ -613,6 +623,94 @@ func cloneChallenges(challenges map[domain.EntityID]domain.Challenge) map[domain
 func cloneChallenge(challenge domain.Challenge) domain.Challenge {
 	challenge.WrongAttemptTimes = append([]domain.Instant(nil), challenge.WrongAttemptTimes...)
 	return challenge
+}
+
+type mailJobReader struct {
+	mailJobs map[domain.EntityID]domain.MailJob
+}
+
+func (r mailJobReader) Get(ctx context.Context, id domain.EntityID) (domain.MailJob, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.MailJob{}, false, err
+	}
+	job, ok := r.mailJobs[id]
+	return job, ok, nil
+}
+
+type mailJobRepository struct{ mailJobReader }
+
+func (r mailJobRepository) Insert(ctx context.Context, job domain.MailJob) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if job.JobID == "" || r.mailJobs[job.JobID].JobID != "" {
+		return application.ErrEntityConflict
+	}
+	r.mailJobs[job.JobID] = job
+	return nil
+}
+
+func (r mailJobRepository) Claim(ctx context.Context, id domain.EntityID, owner string, now, leaseUntil domain.Instant) (bool, domain.MailJob, error) {
+	if err := ctx.Err(); err != nil {
+		return false, domain.MailJob{}, err
+	}
+	job, ok := r.mailJobs[id]
+	if !ok || owner == "" || job.Attempts >= 3 || (job.State != "queued" && job.State != "unknown") {
+		return false, domain.MailJob{}, nil
+	}
+	if job.NextAttemptAt != "" {
+		dueAt, dueErr := time.Parse(time.RFC3339Nano, string(job.NextAttemptAt))
+		nowAt, nowErr := time.Parse(time.RFC3339Nano, string(now))
+		if dueErr != nil || nowErr != nil {
+			return false, domain.MailJob{}, application.ErrInvalidMailJob
+		}
+		if dueAt.After(nowAt) {
+			return false, domain.MailJob{}, nil
+		}
+	}
+	untilAt, untilErr := time.Parse(time.RFC3339Nano, string(leaseUntil))
+	nowAt, nowErr := time.Parse(time.RFC3339Nano, string(now))
+	if untilErr != nil || nowErr != nil || !untilAt.After(nowAt) {
+		return false, domain.MailJob{}, application.ErrInvalidMailJob
+	}
+	job.Attempts++
+	job.State = "sending"
+	job.LastAttemptAt = now
+	job.LeaseOwner = owner
+	job.LeaseUntil = leaseUntil
+	r.mailJobs[id] = job
+	return true, job, nil
+}
+
+func (r mailJobRepository) Finish(ctx context.Context, id domain.EntityID, owner string, attempt int, state, encryptedPayload string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	job, ok := r.mailJobs[id]
+	if !ok || job.State != "sending" || job.LeaseOwner != owner || job.Attempts != attempt {
+		return application.ErrLeaseLost
+	}
+	if state != "delivered" && state != "failed" && state != "unknown" && state != "suppressed" {
+		return application.ErrInvalidMailJob
+	}
+	job.State = state
+	job.LeaseOwner = ""
+	job.LeaseUntil = ""
+	if state == "unknown" {
+		job.EncryptedPayload = encryptedPayload
+	} else {
+		job.EncryptedPayload = ""
+	}
+	r.mailJobs[id] = job
+	return nil
+}
+
+func cloneMailJobs(mailJobs map[domain.EntityID]domain.MailJob) map[domain.EntityID]domain.MailJob {
+	copyOf := make(map[domain.EntityID]domain.MailJob, len(mailJobs))
+	for id, job := range mailJobs {
+		copyOf[id] = job
+	}
+	return copyOf
 }
 
 var _ application.Store = (*Store)(nil)
