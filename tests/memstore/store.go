@@ -84,6 +84,13 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	return application.CommitResult{Outcome: application.Committed, AggregateRevision: s.revision}, nil
 }
 
+func (s *Store) InSystemTx(ctx context.Context, reason string, fn func(application.Tx) error) (application.CommitResult, error) {
+	if strings.TrimSpace(reason) == "" {
+		return application.CommitResult{Outcome: application.NotCommitted}, application.ErrInvalidScope
+	}
+	return s.InTx(ctx, application.Scope{Actor: application.ActorSystem}, fn)
+}
+
 func (s *Store) View(ctx context.Context, scope application.Scope, fn func(application.Reader) error) error {
 	if err := check(ctx, scope); err != nil {
 		return err

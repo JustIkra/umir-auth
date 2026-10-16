@@ -52,6 +52,7 @@ var (
 
 type Store interface {
 	InTx(context.Context, Scope, func(Tx) error) (CommitResult, error)
+	InSystemTx(context.Context, string, func(Tx) error) (CommitResult, error)
 	View(context.Context, Scope, func(Reader) error) error
 }
 

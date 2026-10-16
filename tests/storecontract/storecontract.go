@@ -398,6 +398,18 @@ func Run[T application.Store](t *testing.T, newStore func() T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("system transactions require a reason", func(t *testing.T) {
+		store := newStore()
+		ctx := context.Background()
+		if _, err := store.InSystemTx(ctx, "", func(application.Tx) error { return nil }); !errors.Is(err, application.ErrInvalidScope) {
+			t.Fatalf("system transaction without a reason was accepted: %v", err)
+		}
+		if _, err := store.InSystemTx(ctx, "auth.cleanup", func(tx application.Tx) error {
+			return tx.Budgets().Record(ctx, application.BudgetEvent{Kind: "worker", KeyDigest: "digest", At: "2026-10-16T00:00:00Z"})
+		}); err != nil {
+			t.Fatalf("system transaction with a reason failed: %v", err)
+		}
+	})
 }
 
 func checkFailedTransactionRollsBack(t *testing.T, store application.Store) {
