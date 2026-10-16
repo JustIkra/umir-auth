@@ -376,4 +376,4 @@ Clock. All Go services run on one VM; the `iat` tolerance is zero and stays zero
 
 ## Durable storage migration (wave 2, in progress)
 
-The branch `feat/durable-w2-auth` adds the reference PostgreSQL, RabbitMQ and outbox-relay adapters (copied from `umir-factory reference/durable`, not edited), the `make integration` target and the `tests/itest` helper. The storage port, Postgres schema, subcommands, outbox and R3 are not done yet; the service still runs on the JSON file store. See `docs/superpowers/plans/2026-10-16-durable-w2-auth.md` in the umir-2026 workspace.
+The W2 branch adds the reference PostgreSQL, RabbitMQ and outbox-relay adapters (copied from `umir-factory reference/durable`, not edited), the `make integration` target, the `tests/itest` helper and the initial `application.Store` plus test-only memory contract for user transactions. The memory adapter is test support only, and Accounts does not use the new port yet. The service still runs on the JSON file store; the Postgres schema, durable subcommands, outbox integration and R3 remain pending. See the accepted Auth W2 plan in the orchestration docs.

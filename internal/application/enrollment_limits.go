@@ -136,3 +136,5 @@ func normalizedEmailLogin(input string) string {
 	}
 	return local + "@" + strings.ToLower(host)
 }
+
+func NormalizedLoginKey(input string) string { return normalizedEmailLogin(input) }
