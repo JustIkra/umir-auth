@@ -353,3 +353,23 @@ Organization quota counts non-deleted organizations created by that user, from o
 Stored email/login identities and old command fingerprints are preserved. Ownership and occupancy compare email addresses without case sensitivity. Email-like login comparison applies trim, NFC and lowercase domain to both operands; the local part stays case-sensitive for password sign-in. Ordinary non-email logins stay byte-exact. New command IDs are limited to 256 Unicode code points; retained legacy command records keep their identity for audit. REG1 rejects oversized IDs at admission, including repeats; legacy IDs over the new bound require the matching old contract/runtime for replay. Registration hashes the password after actor/proof checks, outside the shared mutex and behind the bounded password gate. Revision retries reuse that hash. Password validation reports the `password` field.
 
 Startup migrates v1/v2 state to v3 even when registration is disabled. Stop Auth and back up state with its matched secrets before upgrading a stand. Rollback requires restoring that matched backup; this loses later writes. Never open v3 state with an older image. Expired challenges and their OTP jobs are purged on the retention windows described under one-time codes, and their command records stay as tombstones. The tombstones, sessions and other command records are still not purged in this storage format; coordinated cleanup of those is deferred to PostgreSQL (issue #7). The state store compares each replacement against the same clock that Auth uses, so a removal is accepted only after its retention has ended. Keep registration disabled in public environments until that migration is accepted.
+
+## OTP threat model
+
+This section is for the owner's review. It derives the guessing risk of the six-digit email code from the limits the code enforces today (tests in `tests/integration/otp_budget_pin_test.go` pin them); it does not propose new limits. The earlier figure of 8.4 % is not used anywhere.
+
+Mechanics. A code is six digits drawn uniformly with rejection sampling, so one guess hits with probability 1/10^6. A challenge lives ten minutes and locks itself after five wrong codes. A fresh issue never resets a counter: wrong codes are counted per address, over a rolling hour, across every challenge for that address, and the default budget is ten (`wrongCodesPerAddressPerHour`, 1 to 100). Issuing is limited to three codes per address per ten minutes (invitation link mail counts, because the target budget is shared with invitations), sixty per ten minutes overall, and thirty per ten minutes for registration, which has its own overall budget. Verification events are capped at three hundred per minute. Counters are read and written inside the same serialized commit as the comparison, so parallel requests cannot spend more than the budget: a request over budget is refused before the code is compared.
+
+Resulting bounds, at the defaults:
+
+| Scenario | Guesses available | Chance to guess a code |
+| --- | --- | --- |
+| One challenge | 5 | 5 in 10^6 |
+| One address, one hour (budget binds before the 18 challenges the issue cap allows) | 10 | 1 in 10^5 |
+| N addresses, one hour, an attacker who can trigger mail for all of them | 10 per address | about N in 10^5 (a victim also receives every code mail) |
+| Everything Auth accepts, one hour | at most 540 challenges (360 non-registration plus 180 registration) times 5 | about 2.7 in 10^3 that some code of some address is guessed; this needs 540 sent mails, which the SMTP relay and the mailbox owners would see |
+| Raw verification events | 300 per minute, 18,000 per hour | not reachable: pending challenges, not events, are the limit |
+
+Several accounts and parallel clients therefore do not multiply the per-address figure; they only add addresses. An account takeover through password reset needs a code for that exact address, so the per-address row is the risk for a chosen victim, and the Gateway per-client limits (not Auth's) are the control against one client trying many addresses.
+
+Clock. All Go services run on one VM; the `iat` tolerance is zero and stays zero. If the clock steps backwards, the signer refuses to issue tokens and to publish keys until the clock reaches the latest instant it has seen. Running Auth across hosts requires synchronized clocks. The tests `internal/adapters/jwt/clock_step_test.go` record this behaviour.

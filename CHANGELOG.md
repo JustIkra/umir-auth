@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Document the OTP threat model and pin the OTP budgets (ten wrong codes per address per hour, three issues per address per ten minutes shared with invitations) and the signer's clock-step and zero-`iat`-leeway behaviour with tests. No behaviour change.
+
 - Treat invitation addresses that differ only in case as one pending invitation per organization.
 
 - Treat an SMTP dial failure as a retryable delivery failure instead of an unknown outcome; failures after the connection is established stay unknown.
