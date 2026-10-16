@@ -27,6 +27,7 @@ type RegistryResult struct {
 func (s *Accounts) Registry(ctx context.Context) (RegistryResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var observed map[string]RuntimeStatus
 	for {
 		a, err := s.load(ctx)
 		if err != nil {
@@ -35,7 +36,7 @@ func (s *Accounts) Registry(ctx context.Context) (RegistryResult, error) {
 		if len(a.Restaurants) > 10000 {
 			return RegistryResult{}, ErrAuthUnavailable
 		}
-		statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision)
+		statuses, err := s.observeRuntimeStatuses(ctx, a.AggregateRevision, &observed)
 		if errors.Is(err, ErrRevisionConflict) {
 			continue
 		}

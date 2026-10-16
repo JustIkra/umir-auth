@@ -2,6 +2,8 @@ package integration_test
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -72,4 +74,48 @@ func TestLoginCooldownAppliesToAnInFlightVerification(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("password verification did not finish")
 	}
+}
+
+// Passwords the hasher can never accept (over 32 characters, invalid UTF-8) are
+// refused before any throttle entry exists: they cost no Argon2 work, so they
+// must neither fill the table of tracked logins nor start a cooldown.
+func TestLengthAndUTF8RejectedLoginsDoNotMoveTheThrottle(t *testing.T) {
+	long := strings.Repeat("a", 33)
+	broken := "short\xff"
+	t.Run("distinct logins do not fill the table", func(t *testing.T) {
+		s, _, _, m, _ := setup(t)
+		for i := range 4097 {
+			if _, err := s.Login(ctx, application.LoginInput{Login: fmt.Sprintf("nobody-%d", i), Password: long}); !errors.Is(err, application.ErrInvalidCredentials) {
+				t.Fatalf("attempt %d: %v", i, err)
+			}
+		}
+		if m.verifications != 0 {
+			t.Fatalf("%d verifications for refused passwords", m.verifications)
+		}
+		if _, err := s.Login(ctx, application.LoginInput{Login: "owner", Password: "password"}); err != nil {
+			t.Fatalf("a correct login was refused after the flood: %v", err)
+		}
+	})
+	t.Run("five attempts on a real login start no cooldown", func(t *testing.T) {
+		s, _, _, _, _ := setup(t)
+		for i, password := range []string{long, broken, long, broken, long, broken} {
+			if _, err := s.Login(ctx, application.LoginInput{Login: "owner", Password: password}); !errors.Is(err, application.ErrInvalidCredentials) || errors.Is(err, application.ErrLoginRateLimited) {
+				t.Fatalf("attempt %d: %v", i, err)
+			}
+		}
+		if _, err := s.Login(ctx, application.LoginInput{Login: "owner", Password: "password"}); err != nil {
+			t.Fatalf("the real login is in cooldown: %v", err)
+		}
+	})
+	t.Run("ordinary wrong passwords still count", func(t *testing.T) {
+		s, _, _, _, _ := setup(t)
+		for i := range 5 {
+			if _, err := s.Login(ctx, application.LoginInput{Login: "owner", Password: "wrong"}); !errors.Is(err, application.ErrInvalidCredentials) {
+				t.Fatalf("attempt %d: %v", i, err)
+			}
+		}
+		if _, err := s.Login(ctx, application.LoginInput{Login: "owner", Password: "password"}); !errors.Is(err, application.ErrLoginRateLimited) {
+			t.Fatalf("five wrong passwords started no cooldown: %v", err)
+		}
+	})
 }

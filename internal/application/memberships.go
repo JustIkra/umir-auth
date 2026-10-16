@@ -48,6 +48,7 @@ type DurableResult struct {
 func (s *Accounts) RestaurantAccess(ctx context.Context, token string, restaurantID domain.EntityID) (domain.RestaurantAccess, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var observed map[string]RuntimeStatus
 	for {
 		if err := ctx.Err(); err != nil {
 			return domain.RestaurantAccess{}, err
@@ -63,7 +64,7 @@ func (s *Accounts) RestaurantAccess(ctx context.Context, token string, restauran
 		if _, err := domain.RestaurantPermissions(a, u.UserID, restaurantID); err != nil {
 			return domain.RestaurantAccess{}, ErrForbidden
 		}
-		if _, err := s.runtimeAccess(ctx, a, restaurantID); err != nil {
+		if _, err := s.runtimeAccess(ctx, a, restaurantID, &observed); err != nil {
 			if errors.Is(err, ErrRevisionConflict) {
 				continue
 			}

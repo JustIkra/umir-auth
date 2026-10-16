@@ -109,13 +109,14 @@ func (s *Accounts) registrationPasswordAccess(ctx context.Context, actor Challen
 	if err := s.registrationAccess(a, who); err != nil {
 		return false, err
 	}
-	if err := s.challengeAccess(a, who, in.ChallengeID); err != nil {
-		return false, err
-	}
+	// A stored result is replayed even when its challenge was purged since.
 	for _, r := range a.Idempotency {
 		if r.OperationID == "completeEmailChallenge" && r.CommandID == in.CommandID && r.PreauthDigest == who.preauth && r.ActorID == who.user.UserID {
 			return true, nil
 		}
+	}
+	if err := s.challengeAccess(a, who, in.ChallengeID); err != nil {
+		return false, err
 	}
 	i, err := challengeIndex(a, in.ChallengeID)
 	if err != nil {

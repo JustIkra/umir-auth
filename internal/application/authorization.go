@@ -139,6 +139,7 @@ func (s *Accounts) AuthorizeToken(ctx context.Context, in AuthorizationInput) (A
 	if !ok || !SameStringSet(in.Audiences, policy.Audiences) || in.Activity != "foreground" && in.Activity != "background" {
 		return AuthorizationResult{}, ErrForbidden
 	}
+	var observed map[string]RuntimeStatus
 	for {
 		if err := ctx.Err(); err != nil {
 			return AuthorizationResult{}, err
@@ -156,7 +157,7 @@ func (s *Accounts) AuthorizeToken(ctx context.Context, in AuthorizationInput) (A
 		if err != nil || !slices.Contains(access.Permissions, policy.Capability) {
 			return AuthorizationResult{}, ErrForbidden
 		}
-		if _, err := s.runtimeAccess(ctx, a, in.RestaurantID); err != nil {
+		if _, err := s.runtimeAccess(ctx, a, in.RestaurantID, &observed); err != nil {
 			if errors.Is(err, ErrRevisionConflict) {
 				continue
 			}

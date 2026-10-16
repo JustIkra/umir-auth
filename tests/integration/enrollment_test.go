@@ -75,7 +75,7 @@ func (e *enrollmentFixture) reopen(t *testing.T) {
 	if err := e.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	r, err := jsonstore.Open(ctx, e.path)
+	r, err := jsonstore.Open(ctx, e.path, jsonstore.WithClock(e.opts.Clock))
 	if err != nil {
 		t.Fatal(err)
 	}

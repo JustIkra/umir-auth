@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- Read the log `instance_id` from `AUTH_INSTANCE_ID` (C19); a random identifier is only the fallback when it is unset.
+
+- Retry the dummy verifier hash after a failure instead of caching the error until restart.
+
+- Stop the process when a request leaves Accounts in recovery (unknown update outcome): `Accounts.RecoveryPending` makes the worker supervisor treat the next worker error as unrecoverable, so the container restarts instead of staying alive and answering 503.
+
+- Document the OTP threat model and pin the OTP budgets (ten wrong codes per address per hour, three issues per address per ten minutes shared with invitations) and the signer's clock-step and zero-`iat`-leeway behaviour with tests. No behaviour change.
+
+- Treat invitation addresses that differ only in case as one pending invitation per organization.
+
+- Treat an SMTP dial failure as a retryable delivery failure instead of an unknown outcome; failures after the connection is established stay unknown.
+
+- Verify an unknown login against a dummy verifier made by the selected hasher instead of the first account's stored verifier, so its cost no longer depends on that account's parameters.
+
+- Hash passwords outside the Accounts mutex for invited-user completion and password reset, as registration already did: the hash runs behind the bounded password gate after a read-only precheck, an exact repeat needs no hash, and the command re-checks proof, credentials and identity at commit time.
+
+- Supervise background workers: unrecoverable errors (`ErrRecoveryRequired`, `ErrUpdateOutcomeUnknown`, `ErrClosed`) stop `Serve` with the error so the process exits and is restarted; other errors back off 1 to 30 seconds and retry. `Ready` no longer fails because of a worker, and the JWKS route is gated only by signing readiness. Add structured JSON logging (observability section 3 fields) with `auth.worker.degraded|recovered|fatal` and `auth.mail.attempt` events that carry no codes, addresses or tokens. `MailDelivery` gains `Attempt` and `Age`.
+
+- Coalesce peer Status calls: concurrent callers share one call per service, services are asked in parallel, and a revision change during the call reloads the aggregate and re-evaluates against the same answers instead of asking again. A reconciliation pass asks each service once, records the readiness of one restaurant in one commit and no longer re-checks status after every registration (the final observation does).
+
+- Refuse login passwords over 32 code points or with invalid UTF-8 before the failure throttle, so they no longer fill its 4096 counters or start a cooldown. The response is still InvalidCredentials.
+
+- Drop the stateful preauth issuance table and its 1024-entry cap and mutex; preauth tokens stay self-contained (HMAC and time), and the per-client issue limit belongs to Gateway.
+
+- Stop cloning the whole aggregate for readiness and for idle mail-worker ticks: `ValidatedAggregate.Inspect` gives read-only access, and the sweep and the claim only copy the state when they have work. Session and command-result retention are unchanged.
+
+- Replay stored verify and complete results of an enrollment command even after its challenge was purged, instead of answering an unknown challenge.
+
+- Purge expired email challenges and their OTP jobs in the outbox sweep (one hour after expiry or the last wrong attempt, 24 hours after proof expiry; never while a job is queued, sending or unknown) and replace their begin/resend command records with tombstones. A repeat of such a command answers the existing 409 CommandConflict with outcome unknown and issues no challenge. Keeps the 4096 cap as a defensive limit that password-reset floods no longer reach. The file store now takes the Auth clock to validate removals.
+
 - Resolve registration review issues #5–7: separate mail budget, persisted per-address wrong-code budget, creator organization quota/rate, neutral password reset, default-disabled email-code login, disabled outbox suppression, case-insensitive address ownership, bounded command IDs and registration hashing outside the aggregate lock. Preserve stored identities and replay fingerprints. Document v3 backup-only rollback and the deferred challenge-storage cap.
 
 - Add opt-in public registration through existing email challenges, neutral occupied-address responses, atomic account/session completion and schema-v3 forward migration. Preserve challenge limits, replay results and password login.

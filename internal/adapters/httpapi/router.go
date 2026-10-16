@@ -27,6 +27,9 @@ type Options struct {
 	Preauth     *Preauth
 	ServiceKeys map[string]string
 	Ready       func(context.Context) error
+	// JWKSReady, when set, replaces Ready for the key-set route: publishing the
+	// keys depends on the signing key only.
+	JWKSReady func(context.Context) error
 }
 type handler struct {
 	o   Options
@@ -96,8 +99,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		failure(w, application.ErrForbidden)
 		return
 	}
-	if h.o.Ready != nil {
-		if e := h.o.Ready(r.Context()); e != nil {
+	ready := h.o.Ready
+	if h.o.JWKSReady != nil && r.URL.Path == "/internal/auth/v1/jwks" {
+		ready = h.o.JWKSReady
+	}
+	if ready != nil {
+		if e := ready(r.Context()); e != nil {
 			failure(w, application.ErrAuthUnavailable)
 			return
 		}
@@ -197,6 +204,8 @@ func failure(w http.ResponseWriter, e error) {
 		status, code, outcome = 403, "InvalidCsrfToken", "not_committed"
 	case errors.Is(e, application.ErrForbidden):
 		status, code, outcome = 403, "Forbidden", "not_committed"
+	case errors.Is(e, application.ErrCommandResultCleared):
+		status, code, outcome = 409, "CommandConflict", "unknown"
 	case errors.Is(e, application.ErrCommandConflict):
 		status, code, outcome = 409, "CommandConflict", "not_committed"
 	case errors.Is(e, application.ErrRuntimeNotReady):

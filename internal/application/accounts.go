@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -52,11 +53,38 @@ type Accounts struct {
 	mu                sync.Mutex
 	reconciling       chan struct{}
 	recovering        bool
+	recoveryPending   atomic.Bool
 	gate              *verificationGate
 	changing          chan struct{}
 	loginFailures     loginThrottles
 	passwordFailures  map[domain.EntityID]*failureThrottle
 	organizationPages organizationPages
+	statusFlights     statusFlights
+	dummy             dummyVerifier
+}
+
+// dummyVerifier is a verifier made by the selected hasher for a password nobody
+// knows. An unknown login is verified against it, so the work it costs equals
+// that of a known login under the current parameters and never depends on the
+// stored parameters of any real account.
+type dummyVerifier struct {
+	mu    sync.Mutex
+	value string
+}
+
+// dummyVerifier returns the cached dummy, hashing it on first use. A failed hash is
+// not cached: the next unknown login tries again.
+func (s *Accounts) dummyVerifier() (string, error) {
+	s.dummy.mu.Lock()
+	defer s.dummy.mu.Unlock()
+	if s.dummy.value == "" {
+		hash, err := s.opts.Passwords.Hash("umir-auth unknown-login equalizer")
+		if err != nil {
+			return "", err
+		}
+		s.dummy.value = hash
+	}
+	return s.dummy.value, nil
 }
 
 var (
@@ -156,6 +184,19 @@ func NewAccounts(ctx context.Context, o AccountOptions) (*Accounts, error) {
 	}
 	return s, nil
 }
+
+// setRecovering records, under s.mu, that the stored state is in doubt: every
+// later request fails until the process restarts and reloads it.
+func (s *Accounts) setRecovering() {
+	s.recovering = true
+	s.recoveryPending.Store(true)
+}
+
+// RecoveryPending reports whether an update outcome became unknown or recovery
+// was required, after which Accounts refuses all work. It is safe to call without
+// any lock; a supervisor treats it as a reason to stop the process so it restarts.
+func (s *Accounts) RecoveryPending() bool { return s.recoveryPending.Load() }
+
 func (s *Accounts) load(ctx context.Context) (domain.Aggregate, error) {
 	if s.recovering {
 		return domain.Aggregate{}, ErrAuthUnavailable
@@ -163,11 +204,28 @@ func (s *Accounts) load(ctx context.Context) (domain.Aggregate, error) {
 	a, err := s.opts.Repository.Load(ctx)
 	if err != nil {
 		if errors.Is(err, ErrRecoveryRequired) {
-			s.recovering = true
+			s.setRecovering()
 		}
 		return domain.Aggregate{}, errors.Join(ErrAuthUnavailable, err)
 	}
 	return a.Snapshot(), nil
+}
+
+// inspect runs fn over the stored aggregate without cloning it; see
+// domain.ValidatedAggregate.Inspect for what fn may do. The caller holds s.mu.
+func (s *Accounts) inspect(ctx context.Context, fn func(*domain.Aggregate)) error {
+	if s.recovering {
+		return ErrAuthUnavailable
+	}
+	a, err := s.opts.Repository.Load(ctx)
+	if err != nil {
+		if errors.Is(err, ErrRecoveryRequired) {
+			s.setRecovering()
+		}
+		return errors.Join(ErrAuthUnavailable, err)
+	}
+	a.Inspect(fn)
+	return nil
 }
 func (s *Accounts) commit(ctx context.Context, a domain.Aggregate) error {
 	old := a.AggregateRevision
@@ -187,7 +245,7 @@ func (s *Accounts) commit(ctx context.Context, a domain.Aggregate) error {
 	if r.Outcome == NotCommitted && !errors.Is(err, ErrRecoveryRequired) {
 		return errors.Join(ErrStorageUnavailable, err)
 	}
-	s.recovering = true
+	s.setRecovering()
 	return errors.Join(ErrUpdateOutcomeUnknown, err)
 }
 func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error) {
@@ -205,6 +263,12 @@ func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error
 	if replay != nil {
 		s.mu.Unlock()
 		return *replay, nil
+	}
+	if !utf8.ValidString(in.Password) || utf8.RuneCountInString(in.Password) > 32 {
+		// No password this long or malformed is ever stored, so the attempt costs no
+		// hashing: it creates and moves no throttle entry.
+		s.mu.Unlock()
+		return SessionView{}, ErrInvalidCredentials
 	}
 	var user domain.User
 	known := false
@@ -238,12 +302,6 @@ func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error
 		return SessionView{}, rateLimited(wait)
 	}
 	s.mu.Unlock()
-	if !utf8.ValidString(in.Password) || utf8.RuneCountInString(in.Password) > 32 {
-		s.mu.Lock()
-		th.fail(s.opts.Clock.Now(), 5, time.Minute, time.Minute)
-		s.mu.Unlock()
-		return SessionView{}, ErrInvalidCredentials
-	}
 	release, err := s.gate.acquire(ctx, true)
 	if err != nil {
 		return SessionView{}, err
@@ -259,7 +317,13 @@ func (s *Accounts) Login(ctx context.Context, in LoginInput) (SessionView, error
 		return SessionView{}, rateLimited(wait)
 	}
 	s.mu.Unlock()
-	ok, err := s.opts.Passwords.Verify(in.Password, user.Verifier)
+	stored := user.Verifier
+	if !known {
+		if stored, err = s.dummyVerifier(); err != nil {
+			return SessionView{}, ErrAuthUnavailable
+		}
+	}
+	ok, err := s.opts.Passwords.Verify(in.Password, stored)
 	if err != nil {
 		return SessionView{}, ErrAuthUnavailable
 	}
