@@ -3,6 +3,7 @@ package memstore
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/JustIkra/umir-auth/internal/application"
@@ -17,11 +18,12 @@ type Store struct {
 	orgs        map[domain.EntityID]domain.Organization
 	restaurants map[domain.EntityID]domain.Restaurant
 	memberships map[domain.EntityID]domain.Membership
+	invitations map[domain.EntityID]domain.Invitation
 	revision    domain.Version
 }
 
 func New() *Store {
-	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), revision: "1"}
+	return &Store{users: make(map[domain.EntityID]domain.User), sessions: make(map[domain.EntityID]domain.Session), commands: make(map[application.CommandKey]domain.IdempotencyRecord), orgs: make(map[domain.EntityID]domain.Organization), restaurants: make(map[domain.EntityID]domain.Restaurant), memberships: make(map[domain.EntityID]domain.Membership), invitations: make(map[domain.EntityID]domain.Invitation), revision: "1"}
 }
 
 func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(application.Tx) error) (application.CommitResult, error) {
@@ -40,7 +42,8 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	orgs := cloneOrganizations(s.orgs)
 	restaurants := cloneRestaurants(s.restaurants)
 	memberships := cloneMemberships(s.memberships)
-	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships}
+	invitations := cloneInvitations(s.invitations)
+	tx := transaction{users: users, sessions: sessions, commands: commands, orgs: orgs, restaurants: restaurants, memberships: memberships, invitations: invitations}
 	if err := fn(tx); err != nil {
 		return application.CommitResult{Outcome: application.NotCommitted}, err
 	}
@@ -54,6 +57,7 @@ func (s *Store) InTx(ctx context.Context, scope application.Scope, fn func(appli
 	s.orgs = orgs
 	s.restaurants = restaurants
 	s.memberships = memberships
+	s.invitations = invitations
 	return application.CommitResult{Outcome: application.Committed, AggregateRevision: s.revision}, nil
 }
 
@@ -66,7 +70,7 @@ func (s *Store) View(ctx context.Context, scope application.Scope, fn func(appli
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships})
+	return fn(reader{users: s.users, sessions: s.sessions, commands: s.commands, orgs: s.orgs, restaurants: s.restaurants, memberships: s.memberships, invitations: s.invitations})
 }
 
 type reader struct {
@@ -76,6 +80,7 @@ type reader struct {
 	orgs        map[domain.EntityID]domain.Organization
 	restaurants map[domain.EntityID]domain.Restaurant
 	memberships map[domain.EntityID]domain.Membership
+	invitations map[domain.EntityID]domain.Invitation
 }
 
 func (r reader) Users() application.UserReader { return userReader{users: r.users} }
@@ -92,6 +97,9 @@ func (r reader) Restaurants() application.RestaurantReader {
 func (r reader) Memberships() application.MembershipReader {
 	return membershipReader{memberships: r.memberships}
 }
+func (r reader) Invitations() application.InvitationReader {
+	return invitationReader{orgs: r.orgs, restaurants: r.restaurants, invitations: r.invitations}
+}
 
 type transaction struct {
 	users       map[domain.EntityID]domain.User
@@ -100,6 +108,7 @@ type transaction struct {
 	orgs        map[domain.EntityID]domain.Organization
 	restaurants map[domain.EntityID]domain.Restaurant
 	memberships map[domain.EntityID]domain.Membership
+	invitations map[domain.EntityID]domain.Invitation
 }
 
 func (t transaction) Users() application.UserRepository {
@@ -121,6 +130,9 @@ func (t transaction) Restaurants() application.RestaurantRepository {
 }
 func (t transaction) Memberships() application.MembershipRepository {
 	return membershipRepository{users: t.users, orgs: t.orgs, restaurants: t.restaurants, memberships: t.memberships}
+}
+func (t transaction) Invitations() application.InvitationRepository {
+	return invitationRepository{invitationReader{orgs: t.orgs, restaurants: t.restaurants, invitations: t.invitations}}
 }
 
 type userReader struct {
@@ -450,6 +462,94 @@ func cloneMembership(membership domain.Membership) domain.Membership {
 		membership.Assignments[i].Roles = append([]string(nil), membership.Assignments[i].Roles...)
 	}
 	return membership
+}
+
+type invitationReader struct {
+	orgs        map[domain.EntityID]domain.Organization
+	restaurants map[domain.EntityID]domain.Restaurant
+	invitations map[domain.EntityID]domain.Invitation
+}
+
+func (r invitationReader) Get(ctx context.Context, id domain.EntityID) (domain.Invitation, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Invitation{}, false, err
+	}
+	invitation, ok := r.invitations[id]
+	return cloneInvitation(invitation), ok, nil
+}
+
+func (r invitationReader) ForOrganization(ctx context.Context, orgID domain.EntityID) ([]domain.Invitation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var invitations []domain.Invitation
+	for _, invitation := range r.invitations {
+		if invitation.OrgID == orgID {
+			invitations = append(invitations, cloneInvitation(invitation))
+		}
+	}
+	return invitations, nil
+}
+
+func (r invitationReader) PendingByEmail(ctx context.Context, orgID domain.EntityID, email string) (domain.Invitation, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Invitation{}, false, err
+	}
+	key := strings.ToLower(email)
+	for _, invitation := range r.invitations {
+		if invitation.OrgID == orgID && invitation.State == "pending" && strings.ToLower(invitation.ComparisonEmail) == key {
+			return cloneInvitation(invitation), true, nil
+		}
+	}
+	return domain.Invitation{}, false, nil
+}
+
+type invitationRepository struct{ invitationReader }
+
+func (r invitationRepository) Insert(ctx context.Context, invitation domain.Invitation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if invitation.InvitationID == "" || r.invitations[invitation.InvitationID].InvitationID != "" {
+		return application.ErrEntityConflict
+	}
+	if _, ok := r.orgs[invitation.OrgID]; !ok {
+		return application.ErrReferenceMissing
+	}
+	if invitation.State == "pending" {
+		if _, exists, err := r.PendingByEmail(ctx, invitation.OrgID, invitation.ComparisonEmail); err != nil {
+			return err
+		} else if exists {
+			return application.ErrEntityConflict
+		}
+	}
+	for _, assignment := range invitation.Assignments {
+		restaurant, ok := r.restaurants[assignment.RestaurantID]
+		if !ok {
+			return application.ErrReferenceMissing
+		}
+		if restaurant.OrgID != invitation.OrgID {
+			return application.ErrScopeMismatch
+		}
+	}
+	r.invitations[invitation.InvitationID] = cloneInvitation(invitation)
+	return nil
+}
+
+func cloneInvitations(invitations map[domain.EntityID]domain.Invitation) map[domain.EntityID]domain.Invitation {
+	copyOf := make(map[domain.EntityID]domain.Invitation, len(invitations))
+	for id, invitation := range invitations {
+		copyOf[id] = cloneInvitation(invitation)
+	}
+	return copyOf
+}
+
+func cloneInvitation(invitation domain.Invitation) domain.Invitation {
+	invitation.Assignments = append([]domain.InviteAssignment(nil), invitation.Assignments...)
+	for i := range invitation.Assignments {
+		invitation.Assignments[i].Roles = append([]string(nil), invitation.Assignments[i].Roles...)
+	}
+	return invitation
 }
 
 var _ application.Store = (*Store)(nil)

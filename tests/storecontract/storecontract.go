@@ -140,6 +140,26 @@ func Run[T application.Store](t *testing.T, newStore func() T) {
 			t.Fatalf("cross-organization assignment was accepted: %v", err)
 		}
 	})
+	t.Run("one pending invitation per email and organization", func(t *testing.T) {
+		store := newStore()
+		ctx := context.Background()
+		scope := application.Scope{Actor: application.ActorSystem}
+		org := domain.Organization{OrgID: "org-1", Name: "Organization", Lifecycle: "active", LifecycleVersion: "1"}
+		first := domain.Invitation{InvitationID: "invitation-1", OrgID: org.OrgID, Email: "Bob@example.invalid", ComparisonEmail: "Bob@example.invalid", State: "pending", Version: "1"}
+		if _, err := store.InTx(ctx, scope, func(tx application.Tx) error {
+			if err := tx.Organizations().Insert(ctx, org); err != nil {
+				return err
+			}
+			return tx.Invitations().Insert(ctx, first)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		second := domain.Invitation{InvitationID: "invitation-2", OrgID: org.OrgID, Email: "bob@example.invalid", ComparisonEmail: "bob@example.invalid", State: "pending", Version: "1"}
+		_, err := store.InTx(ctx, scope, func(tx application.Tx) error { return tx.Invitations().Insert(ctx, second) })
+		if !errors.Is(err, application.ErrEntityConflict) {
+			t.Fatalf("duplicate pending invite was accepted: %v", err)
+		}
+	})
 }
 
 func checkFailedTransactionRollsBack(t *testing.T, store application.Store) {

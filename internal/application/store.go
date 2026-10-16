@@ -56,6 +56,7 @@ type Reader interface {
 	Organizations() OrganizationReader
 	Restaurants() RestaurantReader
 	Memberships() MembershipReader
+	Invitations() InvitationReader
 }
 
 type Tx interface {
@@ -65,6 +66,7 @@ type Tx interface {
 	Organizations() OrganizationRepository
 	Restaurants() RestaurantRepository
 	Memberships() MembershipRepository
+	Invitations() InvitationRepository
 }
 
 type UserReader interface {
@@ -123,4 +125,15 @@ type MembershipReader interface {
 type MembershipRepository interface {
 	MembershipReader
 	Insert(context.Context, domain.Membership) error
+}
+
+type InvitationReader interface {
+	Get(context.Context, domain.EntityID) (domain.Invitation, bool, error)
+	ForOrganization(context.Context, domain.EntityID) ([]domain.Invitation, error)
+	PendingByEmail(context.Context, domain.EntityID, string) (domain.Invitation, bool, error)
+}
+
+type InvitationRepository interface {
+	InvitationReader
+	Insert(context.Context, domain.Invitation) error
 }
